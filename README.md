@@ -9,7 +9,7 @@ Manages plugins, skills, commands, CLAUDE.md, MCP servers, and settings from a s
 Add to your flake inputs:
 
 ```nix
-inputs.nix-claude.url = "github:your-user/nix-claude";
+inputs.nix-claude.url = "github:christian-oudard/nix-claude";
 ```
 
 ### Home-manager

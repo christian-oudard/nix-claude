@@ -56,21 +56,11 @@ let
     if settings == {} then null
     else builtins.toJSON settings;
 
-  # Version hash: first 12 chars of the nix store hash of the plugin content
+  # Version hash: 12-char hash derived from plugin skill paths
   pluginVersion = name: cfg:
     let
-      # Build a deterministic derivation for the plugin content to get a stable hash
-      contentDrv = pkgs.runCommand "plugin-content-${name}" {} ''
-        mkdir -p "$out"
-        ${lib.concatMapStringsSep "\n" (skill:
-          let sname = baseName skill; in
-          ''
-            mkdir -p "$out/skills/${sname}"
-            cp -r "${skill}/"* "$out/skills/${sname}/"
-          ''
-        ) (cfg.skills or [])}
-      '';
-      hash = builtins.hashString "sha256" (toString contentDrv);
+      skillPaths = map toString (cfg.skills or []);
+      hash = builtins.hashString "sha256" (builtins.concatStringsSep "\n" ([ name ] ++ skillPaths));
     in
     builtins.substring 0 12 hash;
 

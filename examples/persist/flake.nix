@@ -3,7 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nix-claude.url = "github:your-user/nix-claude";  # or path:../..
+    nix-claude.url = "github:christian-oudard/nix-claude";  # or path:../..
     persist.url = "github:christian-oudard/persist";
   };
 
