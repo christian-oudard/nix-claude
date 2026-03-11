@@ -28,11 +28,11 @@ in
     assertions = [
       {
         description = "skill directory is created";
-        script = ''test -d "${mkClaudeConfig { inherit pkgs; skills = [ "${fixtures}/test-skill" ]; }}/commands/test-skill"'';
+        script = ''test -d "${mkClaudeConfig { inherit pkgs; skills = [ "${fixtures}/test-skill" ]; }}/skills/test-skill"'';
       }
       {
         description = "SKILL.md is copied";
-        script = ''test -f "${mkClaudeConfig { inherit pkgs; skills = [ "${fixtures}/test-skill" ]; }}/commands/test-skill/SKILL.md"'';
+        script = ''test -f "${mkClaudeConfig { inherit pkgs; skills = [ "${fixtures}/test-skill" ]; }}/skills/test-skill/SKILL.md"'';
       }
     ];
   };
@@ -216,7 +216,7 @@ in
             mcpServers.github = { command = "/bin/github-mcp"; args = [ "stdio" ]; };
             settings.permissions.allow = [ "Bash" ];
           }}"
-          test -f "$drv/commands/test-skill/SKILL.md"
+          test -f "$drv/skills/test-skill/SKILL.md"
           test -f "$drv/commands/test-command.md"
           test -f "$drv/commands/alpha.md"
           test -f "$drv/commands/beta.md"

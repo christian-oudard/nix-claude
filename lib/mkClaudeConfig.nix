@@ -50,8 +50,8 @@ let
     let name = baseName skill; in
     ''
       if [ -d "${skill}" ]; then
-        mkdir -p "$out/commands/${name}"
-        cp -r "${skill}/"* "$out/commands/${name}/"
+        mkdir -p "$out/skills/${name}"
+        cp -r "${skill}/"* "$out/skills/${name}/"
       else
         mkdir -p "$out/commands"
         cp "${skill}" "$out/commands/${name}"

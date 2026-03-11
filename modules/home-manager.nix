@@ -16,7 +16,8 @@ let
   claudeDir = "${config.home.homeDirectory}/.claude";
   claudeJson = "${config.home.homeDirectory}/.claude.json";
 
-  hasCommands = cfg.skills != [] || cfg.commands != [] || cfg.commandsDir != null;
+  hasSkills = cfg.skills != [];
+  hasCommands = cfg.commands != [] || cfg.commandsDir != null;
   hasMemory = cfg.memory.fragments != [];
   hasMcpServers = cfg.mcpServers != {};
   hasSettings = cfg.settings != {};
@@ -28,29 +29,43 @@ in
     home.packages = lib.optional (cfg.package != null) cfg.package;
 
     home.activation.claudeCodeConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      # Ensure ~/.claude/commands exists
-      install -d -m 0755 "${claudeDir}/commands"
+      ${lib.optionalString hasSkills ''
+        install -d -m 0755 "${claudeDir}/skills"
+
+        # Clean previously managed skills
+        if [ -f "${claudeDir}/skills/.nix-claude-managed" ]; then
+          while IFS= read -r managed; do
+            rm -rf "${claudeDir}/skills/$managed"
+          done < "${claudeDir}/skills/.nix-claude-managed"
+        fi
+
+        # Install skills from the derivation
+        manifest=""
+        for item in "${configDrv}/skills/"*; do
+          name="$(basename "$item")"
+          rm -rf "${claudeDir}/skills/$name"
+          cp -r "$item" "${claudeDir}/skills/$name"
+          chmod -R u+w "${claudeDir}/skills/$name"
+          manifest="$manifest$name"$'\n'
+        done
+        printf '%s' "$manifest" > "${claudeDir}/skills/.nix-claude-managed"
+      ''}
 
       ${lib.optionalString hasCommands ''
-        # Clean managed commands directory and repopulate
-        # Only remove files/dirs that came from nix-claude (tracked via marker)
+        install -d -m 0755 "${claudeDir}/commands"
+
+        # Clean previously managed commands
         if [ -f "${claudeDir}/commands/.nix-claude-managed" ]; then
           while IFS= read -r managed; do
             rm -rf "${claudeDir}/commands/$managed"
           done < "${claudeDir}/commands/.nix-claude-managed"
         fi
 
-        # Copy commands and skills from the derivation
+        # Install commands from the derivation
         manifest=""
         for item in "${configDrv}/commands/"*; do
           name="$(basename "$item")"
-          if [ -d "$item" ]; then
-            rm -rf "${claudeDir}/commands/$name"
-            cp -r "$item" "${claudeDir}/commands/$name"
-            chmod -R u+w "${claudeDir}/commands/$name"
-          else
-            install -m 0644 "$item" "${claudeDir}/commands/$name"
-          fi
+          install -m 0644 "$item" "${claudeDir}/commands/$name"
           manifest="$manifest$name"$'\n'
         done
         printf '%s' "$manifest" > "${claudeDir}/commands/.nix-claude-managed"
