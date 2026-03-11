@@ -2,7 +2,7 @@
 
 Declarative configuration for Claude Code via Nix.
 
-Manages skills, commands, CLAUDE.md, MCP servers, and settings from a single Nix expression. Works with home-manager or standalone.
+Manages plugins, skills, commands, CLAUDE.md, MCP servers, and settings from a single Nix expression. Works with home-manager or standalone.
 
 ## Quick start
 
@@ -21,17 +21,14 @@ inputs.nix-claude.url = "github:your-user/nix-claude";
 
   programs.claude-code = {
     enable = true;
+    skipOnboarding = true;
 
-    skills = [
-      persist.skills.persist
-      persist.skills.persist-status
-      persist.skills.persist-stop
-      ./my-local-skill  # directory containing SKILL.md
-    ];
+    plugins.persist = {
+      description = "Persistent coding sessions";
+      skills = builtins.attrValues persist.skills;
+    };
 
-    commands = [
-      ./commands/quick-review.md
-    ];
+    commands = [ ./commands/quick-review.md ];
 
     memory.fragments = [
       ./base-instructions.md
@@ -60,15 +57,20 @@ inputs.nix-claude.url = "github:your-user/nix-claude";
 let
   claudeConfig = nix-claude.lib.mkClaudeConfig {
     inherit pkgs;
-    skills = [ ./skills/my-skill ];
+    skipOnboarding = true;
+    plugins.persist = {
+      description = "Persistent coding sessions";
+      skills = builtins.attrValues persist.skills;
+    };
     memory.fragments = [ ./instructions.md ];
     mcpServers.github = { command = "..."; args = [ "stdio" ]; };
   };
 in
-# claudeConfig is a derivation:
-# $out/skills/my-skill/SKILL.md
+# claudeConfig is a derivation containing:
+# $out/plugins/cache/nix-claude/persist/<version>/...
+# $out/plugins/installed_plugins.json
 # $out/CLAUDE.md
-# $out/mcp-servers.json
+# $out/dot-claude.json
 ```
 
 Copy the output into `~/.claude/` however you like.
@@ -79,36 +81,32 @@ Copy the output into `~/.claude/` however you like.
 |--------|------|---------|-------------|
 | `enable` | bool | `false` | Enable config management |
 | `package` | package or null | `null` | Claude Code package to install |
-| `skills` | list of path | `[]` | Directories containing SKILL.md |
+| `plugins` | attrset of { description, skills } | `{}` | Plugins installed via Claude's plugin system |
+| `skills` | list of path | `[]` | Bare skills installed to ~/.claude/skills/ |
 | `commands` | list of path | `[]` | Flat markdown command files |
 | `commandsDir` | path or null | `null` | Directory of .md files to bulk-import |
 | `memory.fragments` | list of (path or string) | `[]` | Concatenated into CLAUDE.md |
 | `memory.separator` | string | `"\n\n"` | Separator between fragments |
 | `mcpServers` | attrset | `{}` | MCP server configs, merged into ~/.claude.json |
+| `skipOnboarding` | bool | `false` | Skip first-run onboarding prompts |
+| `dotClaudeJson` | attrset | `{}` | Arbitrary fields merged into ~/.claude.json |
 | `settings` | attrset | `{}` | Written to ~/.claude/settings.json |
 
-## How it works
+## Plugins vs skills
 
-- **Skills** go to `~/.claude/skills/<name>/SKILL.md`
-- **Commands** go to `~/.claude/commands/<name>.md`
-- **CLAUDE.md** is concatenated from fragments in order
-- **MCP servers** are deep-merged into `~/.claude.json` (preserving runtime state)
-- **Settings** are written wholesale to `~/.claude/settings.json`
-- All files are **copied, not symlinked** (Claude Code can't read symlinks)
-- Managed files are tracked via manifest for clean removal on config change
+**Plugins** (`plugins` option) are installed through Claude Code's plugin system -- they appear in `~/.claude/plugins/` with full metadata (`installed_plugins.json`, `plugin.json`), as if installed via the marketplace. This is the recommended way to install skills.
+
+**Bare skills** (`skills` option) are installed directly to `~/.claude/skills/`. Simpler, but not visible to Claude Code's plugin management.
 
 ## Writing a plugin flake
 
-A Claude Code plugin can export paths for nix-claude:
+A Claude Code plugin flake should export:
 
 ```nix
 {
-  # Package the binary
-  packages.${system}.default = pkgs.buildSomething { ... };
-
-  # Export skill directories
+  packages.${system}.default = pkgs.buildSomething { ... };  # the binary
   skills = {
-    my-skill = ./skills/my-skill;
+    my-skill = ./skills/my-skill;       # directories with SKILL.md
     my-other-skill = ./skills/my-other-skill;
   };
 }
@@ -116,9 +114,31 @@ A Claude Code plugin can export paths for nix-claude:
 
 See `examples/persist/` for a real-world example using [persist](https://github.com/christian-oudard/persist).
 
+## Authentication
+
+nix-claude manages configuration, not credentials. Authentication is handled separately:
+
+**Interactive (desktop NixOS):** Run `claude auth login` after your first `home-manager switch`. This opens a browser OAuth flow and stores the token in your system keychain. Works fine with `skipOnboarding = true` -- onboarding and auth are separate flows.
+
+**Headless (servers, CI, sandboxes):** Generate a long-lived token with `claude setup-token`, then pass it via environment variable:
+
+```nix
+# home-manager
+home.sessionVariables.CLAUDE_CODE_OAUTH_TOKEN = "$(cat /run/secrets/claude-token)";
+
+# or via your secrets manager (sops-nix, agenix, etc.)
+sops.secrets.claude-oauth-token = {};
+systemd.user.sessionVariables.CLAUDE_CODE_OAUTH_TOKEN =
+  config.sops.secrets.claude-oauth-token.path;
+```
+
+**API key (no subscription):** Set `ANTHROPIC_API_KEY` instead of using OAuth.
+
+nix-claude never writes tokens to the Nix store or to disk. Credentials should flow through environment variables or your secrets manager. Good options include [sops-nix](https://github.com/Mic92/sops-nix), [agenix](https://github.com/ryantm/agenix), and [chezmoi](https://www.chezmoi.io/) (which complements Nix well for managing secrets and other mutable dotfiles that don't belong in the Nix store).
+
 ## Composing with mcps.nix
 
-nix-claude composes with [mcps.nix](https://github.com/roman/mcps.nix) via home-manager option merging. Both write to `programs.claude-code.mcpServers` independently:
+nix-claude composes with [mcps.nix](https://github.com/roman/mcps.nix) via home-manager option merging:
 
 ```nix
 imports = [
@@ -127,7 +147,7 @@ imports = [
 ];
 ```
 
-No configuration needed -- home-manager merges the `mcpServers` attrsets by key.
+Both write to `programs.claude-code.mcpServers` independently -- home-manager merges by key.
 
 ## Running tests
 

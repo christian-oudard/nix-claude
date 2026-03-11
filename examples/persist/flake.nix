@@ -17,14 +17,15 @@
       # Option A: standalone derivation (for coding-cave or manual install)
       packages.${system}.claude-config = nix-claude.lib.mkClaudeConfig {
         inherit pkgs;
-        skills = builtins.attrValues persist.skills;
+        skipOnboarding = true;
+        plugins.persist = {
+          description = "Persistent coding sessions for Claude Code";
+          skills = builtins.attrValues persist.skills;
+        };
         settings = {
           hooks.Stop = [{
             matcher = "";
-            hooks = [{
-              type = "command";
-              command = "${persistPkg}/bin/persist hook";
-            }];
+            hooks = [{ type = "command"; command = "${persistPkg}/bin/persist hook"; }];
           }];
         };
       };
@@ -36,14 +37,15 @@
       #
       #   programs.claude-code = {
       #     enable = true;
-      #     skills = builtins.attrValues persist.skills;
+      #     skipOnboarding = true;
+      #     plugins.persist = {
+      #       description = "Persistent coding sessions for Claude Code";
+      #       skills = builtins.attrValues persist.skills;
+      #     };
       #     settings = {
       #       hooks.Stop = [{
       #         matcher = "";
-      #         hooks = [{
-      #           type = "command";
-      #           command = "${persistPkg}/bin/persist hook";
-      #         }];
+      #         hooks = [{ type = "command"; command = "${persistPkg}/bin/persist hook"; }];
       #       }];
       #     };
       #   };

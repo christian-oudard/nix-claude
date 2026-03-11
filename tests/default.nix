@@ -122,22 +122,67 @@ in
         args = [ "stdio" ];
       };
     };
-    assertions = [
-      {
-        description = "mcp-servers.json exists";
-        script = ''
-          drv="${mkClaudeConfig { inherit pkgs; mcpServers.test-server = { command = "/bin/test-server"; args = [ "stdio" ]; }; }}"
-          test -f "$drv/mcp-servers.json"
-        '';
-      }
-      {
-        description = "mcp-servers.json contains server config";
-        script = ''
-          drv="${mkClaudeConfig { inherit pkgs; mcpServers.test-server = { command = "/bin/test-server"; args = [ "stdio" ]; }; }}"
-          ${pkgs.jq}/bin/jq -e '.mcpServers["test-server"].command == "/bin/test-server"' "$drv/mcp-servers.json"
-        '';
-      }
-    ];
+    assertions =
+      let drv = mkClaudeConfig { inherit pkgs; mcpServers.test-server = { command = "/bin/test-server"; args = [ "stdio" ]; }; }; in
+      [
+        {
+          description = "dot-claude.json exists";
+          script = ''test -f "${drv}/dot-claude.json"'';
+        }
+        {
+          description = "dot-claude.json contains server config";
+          script = ''${pkgs.jq}/bin/jq -e '.mcpServers["test-server"].command == "/bin/test-server"' "${drv}/dot-claude.json"'';
+        }
+      ];
+  };
+
+  skip-onboarding = mkTest "skip-onboarding" {
+    config = {
+      inherit pkgs;
+      skipOnboarding = true;
+    };
+    assertions =
+      let drv = mkClaudeConfig { inherit pkgs; skipOnboarding = true; }; in
+      [
+        {
+          description = "dot-claude.json exists";
+          script = ''test -f "${drv}/dot-claude.json"'';
+        }
+        {
+          description = "hasCompletedOnboarding is true";
+          script = ''${pkgs.jq}/bin/jq -e '.hasCompletedOnboarding == true' "${drv}/dot-claude.json"'';
+        }
+        {
+          description = "effortCalloutDismissed is true";
+          script = ''${pkgs.jq}/bin/jq -e '.effortCalloutDismissed == true' "${drv}/dot-claude.json"'';
+        }
+      ];
+  };
+
+  dot-claude-json = mkTest "dot-claude-json" {
+    config = {
+      inherit pkgs;
+      skipOnboarding = true;
+      mcpServers.test = { command = "/bin/test"; };
+      dotClaudeJson = { theme = "dark"; };
+    };
+    assertions =
+      let drv = mkClaudeConfig {
+        inherit pkgs;
+        skipOnboarding = true;
+        mcpServers.test = { command = "/bin/test"; };
+        dotClaudeJson = { theme = "dark"; };
+      }; in
+      [
+        {
+          description = "all sources merged into dot-claude.json";
+          script = ''
+            ${pkgs.jq}/bin/jq -e '.hasCompletedOnboarding == true' "${drv}/dot-claude.json"
+            ${pkgs.jq}/bin/jq -e '.mcpServers.test.command == "/bin/test"' "${drv}/dot-claude.json"
+            ${pkgs.jq}/bin/jq -e '.theme == "dark"' "${drv}/dot-claude.json"
+          '';
+        }
+      ];
   };
 
   settings = mkTest "settings" {
@@ -165,6 +210,80 @@ in
     ];
   };
 
+  plugin-install = mkTest "plugin-install" {
+    config = {
+      inherit pkgs;
+      plugins.test-plugin = {
+        description = "A test plugin";
+        skills = [ "${fixtures}/test-skill" ];
+      };
+    };
+    assertions =
+      let drv = mkClaudeConfig {
+        inherit pkgs;
+        plugins.test-plugin = {
+          description = "A test plugin";
+          skills = [ "${fixtures}/test-skill" ];
+        };
+      }; in
+      [
+        {
+          description = "plugin cache directory exists";
+          script = ''test -d "${drv}/plugins/cache/nix-claude/test-plugin"'';
+        }
+        {
+          description = "plugin.json exists";
+          script = ''
+            found=$(find "${drv}/plugins/cache/nix-claude/test-plugin" -name plugin.json)
+            test -n "$found"
+          '';
+        }
+        {
+          description = "plugin.json has correct name";
+          script = ''
+            found=$(find "${drv}/plugins/cache/nix-claude/test-plugin" -name plugin.json)
+            ${pkgs.jq}/bin/jq -e '.name == "test-plugin"' "$found"
+          '';
+        }
+        {
+          description = "plugin.json has correct description";
+          script = ''
+            found=$(find "${drv}/plugins/cache/nix-claude/test-plugin" -name plugin.json)
+            ${pkgs.jq}/bin/jq -e '.description == "A test plugin"' "$found"
+          '';
+        }
+        {
+          description = "skill is inside plugin cache";
+          script = ''
+            found=$(find "${drv}/plugins/cache/nix-claude/test-plugin" -name SKILL.md)
+            test -n "$found"
+          '';
+        }
+        {
+          description = "installed_plugins.json exists";
+          script = ''test -f "${drv}/plugins/installed_plugins.json"'';
+        }
+        {
+          description = "installed_plugins.json has nix-claude marketplace entry";
+          script = ''
+            ${pkgs.jq}/bin/jq -e '.plugins["test-plugin@nix-claude"]' "${drv}/plugins/installed_plugins.json"
+          '';
+        }
+        {
+          description = "installed_plugins.json has version 2";
+          script = ''
+            ${pkgs.jq}/bin/jq -e '.version == 2' "${drv}/plugins/installed_plugins.json"
+          '';
+        }
+        {
+          description = "entry has user scope";
+          script = ''
+            ${pkgs.jq}/bin/jq -e '.plugins["test-plugin@nix-claude"][0].scope == "user"' "${drv}/plugins/installed_plugins.json"
+          '';
+        }
+      ];
+  };
+
   empty-config = mkTest "empty-config" {
     config = { inherit pkgs; };
     assertions = [
@@ -181,8 +300,8 @@ in
         script = ''! test -f "${mkClaudeConfig { inherit pkgs; }}/settings.json"'';
       }
       {
-        description = "no mcp-servers.json when no servers";
-        script = ''! test -f "${mkClaudeConfig { inherit pkgs; }}/mcp-servers.json"'';
+        description = "no dot-claude.json when no servers";
+        script = ''! test -f "${mkClaudeConfig { inherit pkgs; }}/dot-claude.json"'';
       }
     ];
   };
@@ -221,7 +340,7 @@ in
           test -f "$drv/commands/alpha.md"
           test -f "$drv/commands/beta.md"
           test -f "$drv/CLAUDE.md"
-          test -f "$drv/mcp-servers.json"
+          test -f "$drv/dot-claude.json"
           test -f "$drv/settings.json"
         '';
       }

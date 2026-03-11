@@ -7,7 +7,7 @@ let
 
   configDrv = mkClaudeConfig {
     inherit pkgs;
-    inherit (cfg) skills commands commandsDir mcpServers settings;
+    inherit (cfg) plugins skills commands commandsDir mcpServers settings skipOnboarding dotClaudeJson;
     memory = {
       inherit (cfg.memory) fragments separator;
     };
@@ -16,10 +16,11 @@ let
   claudeDir = "${config.home.homeDirectory}/.claude";
   claudeJson = "${config.home.homeDirectory}/.claude.json";
 
+  hasPlugins = cfg.plugins != {};
   hasSkills = cfg.skills != [];
   hasCommands = cfg.commands != [] || cfg.commandsDir != null;
   hasMemory = cfg.memory.fragments != [];
-  hasMcpServers = cfg.mcpServers != {};
+  hasDotClaudeJson = cfg.mcpServers != {} || cfg.skipOnboarding || cfg.dotClaudeJson != {};
   hasSettings = cfg.settings != {};
 in
 {
@@ -29,6 +30,47 @@ in
     home.packages = lib.optional (cfg.package != null) cfg.package;
 
     home.activation.claudeCodeConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+      ${lib.optionalString hasPlugins ''
+        install -d -m 0755 "${claudeDir}/plugins/cache/nix-claude"
+
+        # Clean previously managed plugins
+        if [ -f "${claudeDir}/plugins/.nix-claude-managed" ]; then
+          while IFS= read -r managed; do
+            rm -rf "${claudeDir}/plugins/cache/nix-claude/$managed"
+          done < "${claudeDir}/plugins/.nix-claude-managed"
+        fi
+
+        # Install plugin cache directories
+        manifest=""
+        for plugin in "${configDrv}/plugins/cache/nix-claude/"*; do
+          name="$(basename "$plugin")"
+          rm -rf "${claudeDir}/plugins/cache/nix-claude/$name"
+          cp -r "$plugin" "${claudeDir}/plugins/cache/nix-claude/$name"
+          chmod -R u+w "${claudeDir}/plugins/cache/nix-claude/$name"
+          manifest="$manifest$name"$'\n'
+        done
+        printf '%s' "$manifest" > "${claudeDir}/plugins/.nix-claude-managed"
+
+        # Merge installed_plugins.json
+        # Replace __PLUGINS_DIR__ placeholder with actual path
+        nix_plugins="$(${pkgs.jq}/bin/jq --arg dir "${claudeDir}/plugins" \
+          'walk(if type == "string" then gsub("__PLUGINS_DIR__"; $dir) else . end)' \
+          "${configDrv}/plugins/installed_plugins.json")"
+
+        if [ -f "${claudeDir}/plugins/installed_plugins.json" ]; then
+          # Merge: nix-claude entries override, existing non-nix-claude entries preserved
+          existing="$(cat "${claudeDir}/plugins/installed_plugins.json")"
+          printf '%s\n%s' "$existing" "$nix_plugins" | \
+            ${pkgs.jq}/bin/jq -s '
+              .[0] as $existing | .[1] as $new |
+              $existing * { plugins: ($existing.plugins // {} | to_entries | map(select(.key | endswith("@nix-claude") | not)) | from_entries) * $new.plugins }
+            ' > "${claudeDir}/plugins/installed_plugins.json.tmp"
+          mv "${claudeDir}/plugins/installed_plugins.json.tmp" "${claudeDir}/plugins/installed_plugins.json"
+        else
+          printf '%s' "$nix_plugins" > "${claudeDir}/plugins/installed_plugins.json"
+        fi
+      ''}
+
       ${lib.optionalString hasSkills ''
         install -d -m 0755 "${claudeDir}/skills"
 
@@ -79,16 +121,16 @@ in
         install -m 0644 "${configDrv}/settings.json" "${claudeDir}/settings.json"
       ''}
 
-      ${lib.optionalString hasMcpServers ''
-        # Merge mcpServers into ~/.claude.json
+      ${lib.optionalString hasDotClaudeJson ''
+        # Deep-merge nix-claude fields into ~/.claude.json
         if [ -f "${claudeJson}" ]; then
           ${pkgs.jq}/bin/jq -s '.[0] * .[1]' \
             "${claudeJson}" \
-            "${configDrv}/mcp-servers.json" \
+            "${configDrv}/dot-claude.json" \
             > "${claudeJson}.tmp"
           mv "${claudeJson}.tmp" "${claudeJson}"
         else
-          install -m 0644 "${configDrv}/mcp-servers.json" "${claudeJson}"
+          install -m 0644 "${configDrv}/dot-claude.json" "${claudeJson}"
         fi
       ''}
     '';

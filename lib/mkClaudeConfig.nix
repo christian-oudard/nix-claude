@@ -1,12 +1,15 @@
 { lib }:
 
 { pkgs
+, plugins ? {}
 , skills ? []
 , commands ? []
 , commandsDir ? null
 , memory ? {}
 , mcpServers ? {}
 , settings ? {}
+, skipOnboarding ? false
+, dotClaudeJson ? {}
 }:
 
 let
@@ -38,14 +41,85 @@ let
 
   allCommands = commands ++ commandsDirFiles;
 
-  mcpServersJson =
-    if mcpServers == {} then null
-    else builtins.toJSON { inherit mcpServers; };
+  # Assemble ~/.claude.json content from multiple sources
+  onboardingAttrs = lib.optionalAttrs skipOnboarding {
+    hasCompletedOnboarding = true;
+    effortCalloutDismissed = true;
+  };
+  mcpServersAttrs = lib.optionalAttrs (mcpServers != {}) { inherit mcpServers; };
+  mergedDotClaudeJson = onboardingAttrs // mcpServersAttrs // dotClaudeJson;
+  dotClaudeJsonOut =
+    if mergedDotClaudeJson == {} then null
+    else builtins.toJSON mergedDotClaudeJson;
 
   settingsJson =
     if settings == {} then null
     else builtins.toJSON settings;
 
+  # Version hash: first 12 chars of the nix store hash of the plugin content
+  pluginVersion = name: cfg:
+    let
+      # Build a deterministic derivation for the plugin content to get a stable hash
+      contentDrv = pkgs.runCommand "plugin-content-${name}" {} ''
+        mkdir -p "$out"
+        ${lib.concatMapStringsSep "\n" (skill:
+          let sname = baseName skill; in
+          ''
+            mkdir -p "$out/skills/${sname}"
+            cp -r "${skill}/"* "$out/skills/${sname}/"
+          ''
+        ) (cfg.skills or [])}
+      '';
+      hash = builtins.hashString "sha256" (toString contentDrv);
+    in
+    builtins.substring 0 12 hash;
+
+  # Build installed_plugins.json
+  pluginEntries = lib.mapAttrs (name: cfg:
+    let version = pluginVersion name cfg; in
+    [{
+      scope = "user";
+      # Placeholder path -- activation script fills in the real absolute path
+      installPath = "__PLUGINS_DIR__/cache/nix-claude/${name}/${version}";
+      inherit version;
+      installedAt = "1970-01-01T00:00:00.000Z";
+      lastUpdated = "1970-01-01T00:00:00.000Z";
+    }]
+  ) plugins;
+
+  installedPluginsJson =
+    if plugins == {} then null
+    else builtins.toJSON {
+      version = 2;
+      plugins = lib.mapAttrs' (name: value:
+        lib.nameValuePair "${name}@nix-claude" value
+      ) pluginEntries;
+    };
+
+  # Install plugin cache directories
+  installPlugins = lib.concatStringsSep "\n" (lib.mapAttrsToList (name: cfg:
+    let
+      version = pluginVersion name cfg;
+      pluginDir = "$out/plugins/cache/nix-claude/${name}/${version}";
+      description = cfg.description or "Installed via nix-claude";
+      pluginJson = builtins.toJSON {
+        inherit name description;
+      };
+    in
+    ''
+      mkdir -p "${pluginDir}/.claude-plugin"
+      cp ${pkgs.writeText "plugin-${name}.json" pluginJson} "${pluginDir}/.claude-plugin/plugin.json"
+      ${lib.concatMapStringsSep "\n" (skill:
+        let sname = baseName skill; in
+        ''
+          mkdir -p "${pluginDir}/skills/${sname}"
+          cp -r "${skill}/"* "${pluginDir}/skills/${sname}/"
+        ''
+      ) (cfg.skills or [])}
+    ''
+  ) plugins);
+
+  # Install bare skills (not through plugin system)
   installSkills = lib.concatMapStringsSep "\n" (skill:
     let name = baseName skill; in
     ''
@@ -71,15 +145,20 @@ in
 pkgs.runCommand "claude-config" {} ''
   mkdir -p "$out"
 
+  ${installPlugins}
   ${installSkills}
   ${installCommands}
+
+  ${lib.optionalString (installedPluginsJson != null) ''
+    cp ${pkgs.writeText "installed_plugins.json" installedPluginsJson} "$out/plugins/installed_plugins.json"
+  ''}
 
   ${lib.optionalString (claudeMd != null) ''
     cp ${pkgs.writeText "CLAUDE.md" claudeMd} "$out/CLAUDE.md"
   ''}
 
-  ${lib.optionalString (mcpServersJson != null) ''
-    cp ${pkgs.writeText "mcp-servers.json" mcpServersJson} "$out/mcp-servers.json"
+  ${lib.optionalString (dotClaudeJsonOut != null) ''
+    cp ${pkgs.writeText "dot-claude.json" dotClaudeJsonOut} "$out/dot-claude.json"
   ''}
 
   ${lib.optionalString (settingsJson != null) ''

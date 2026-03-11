@@ -13,14 +13,37 @@ in
       description = "Claude Code package to install. Set to null to skip installing the binary.";
     };
 
+    plugins = mkOption {
+      type = types.attrsOf (types.submodule {
+        options = {
+          description = mkOption {
+            type = types.str;
+            default = "";
+            description = "Plugin description for plugin.json.";
+          };
+          skills = mkOption {
+            type = types.listOf types.path;
+            default = [];
+            description = "Skill directories (containing SKILL.md) provided by this plugin.";
+          };
+        };
+      });
+      default = {};
+      description = ''
+        Plugins to install via the Claude Code plugin system.
+        Each plugin is registered in installed_plugins.json under the
+        nix-claude virtual marketplace, with its skills installed to
+        the plugin cache directory.
+      '';
+    };
+
     skills = mkOption {
       type = types.listOf types.path;
       default = [];
       description = ''
-        List of skill paths. Each path should be either:
-        - A directory containing SKILL.md (installed as a directory-based skill)
-        - A file (installed as a flat command)
-        The directory/file name becomes the slash command name.
+        Bare skill paths installed directly to ~/.claude/skills/.
+        For full plugin integration, use the plugins option instead.
+        Each path should be a directory containing SKILL.md.
       '';
     };
 
@@ -60,6 +83,26 @@ in
         MCP server configurations. Each key is a server name, each value
         is an attrset with command, args, env, etc.
         Merged into ~/.claude.json under the mcpServers key.
+      '';
+    };
+
+    skipOnboarding = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Skip Claude Code's first-run onboarding prompts.
+        Sets hasCompletedOnboarding and effortCalloutDismissed in ~/.claude.json.
+      '';
+    };
+
+    dotClaudeJson = mkOption {
+      type = types.attrs;
+      default = {};
+      description = ''
+        Arbitrary fields to deep-merge into ~/.claude.json.
+        Use this for any .claude.json fields not covered by other options
+        (e.g. theme, model preferences). mcpServers and skipOnboarding
+        fields are merged automatically; you don't need to duplicate them here.
       '';
     };
 
