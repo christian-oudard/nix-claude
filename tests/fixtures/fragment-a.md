@@ -1,0 +1,1 @@
+Fragment A content.
