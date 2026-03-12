@@ -276,6 +276,26 @@ programs.claude-code = {
 };
 ```
 
+## Relationship with home-manager's built-in module
+
+Home-manager (via claude-code-nix or upstream) provides a built-in `programs.claude-code` module that handles:
+
+- `enable`, `package` -- installing the Claude Code binary
+- `settings` -- `~/.claude/settings.json` (using `pkgs.formats.json` type)
+- `memory`, `commands`, `skills` -- CLAUDE.md, commands, bare skills
+- `mcpServers`, `skipOnboarding`, `dotClaudeJson` -- `~/.claude.json`
+
+nix-claude's home-manager module does NOT re-declare any of these options. It only declares `programs.claude-code.plugins`, which is a new option not provided by the built-in module. The module then:
+
+1. Installs plugin skills to the plugin cache directory via activation scripts
+2. Registers plugins in `installed_plugins.json`
+3. Collects `package` from each plugin and adds them to `home.packages`
+4. Deep-merges `settings` from each plugin into `programs.claude-code.settings` via `lib.mkMerge`
+
+This design means the two modules compose cleanly: users configure core settings through the built-in module, and add plugins through nix-claude. Plugin settings (like hooks) merge naturally with user settings because `pkgs.formats.json` concatenates list values.
+
+For standalone use (coding-cave, scripts), `mkClaudeConfig` still supports the full configuration surface.
+
 ## Relationship to other projects
 
 ```

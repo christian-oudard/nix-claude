@@ -35,13 +35,17 @@
       #
       #   imports = [ nix-claude.homeManagerModules.default ];
       #
+      #   # Built-in module handles core config
       #   programs.claude-code = {
       #     enable = true;
       #     skipOnboarding = true;
-      #     plugins.persist = {
-      #       description = "Persistent coding sessions for Claude Code";
-      #       skills = builtins.attrValues persist.skills;
-      #     };
+      #   };
+      #
+      #   # nix-claude adds plugin support (package + settings bundled with the plugin)
+      #   programs.claude-code.plugins.persist = {
+      #     description = "Persistent coding sessions for Claude Code";
+      #     skills = builtins.attrValues persist.skills;
+      #     package = persistPkg;
       #     settings = {
       #       hooks.Stop = [{
       #         matcher = "";
@@ -49,7 +53,5 @@
       #       }];
       #     };
       #   };
-      #
-      #   home.packages = [ persistPkg ];
     };
 }

@@ -2,7 +2,7 @@
 
 Declarative configuration for Claude Code via Nix.
 
-Manages plugins, skills, commands, CLAUDE.md, MCP servers, and settings from a single Nix expression. Works with home-manager or standalone.
+Manages Claude Code plugins via Nix. The home-manager module adds plugin support (skills, packages, settings) alongside the built-in `programs.claude-code` module. For standalone use (coding-cave, scripts), `mkClaudeConfig` supports the full configuration surface.
 
 ## Quick start
 
@@ -12,21 +12,22 @@ Add to your flake inputs:
 inputs.nix-claude.url = "github:christian-oudard/nix-claude";
 ```
 
-### Home-manager
+### Home-manager (with built-in module)
+
+nix-claude adds plugin support alongside the built-in `programs.claude-code` module:
 
 ```nix
 { nix-claude, persist, ... }:
+let
+  persistPkg = persist.packages.${system}.default;
+in
 {
   imports = [ nix-claude.homeManagerModules.default ];
 
+  # Built-in module handles core config
   programs.claude-code = {
     enable = true;
     skipOnboarding = true;
-
-    plugins.persist = {
-      description = "Persistent coding sessions";
-      skills = builtins.attrValues persist.skills;
-    };
 
     commands = [ ./commands/quick-review.md ];
 
@@ -42,14 +43,25 @@ inputs.nix-claude.url = "github:christian-oudard/nix-claude";
 
     settings = {
       permissions.allow = [ "Bash" "Read" "Write" ];
+    };
+  };
+
+  # nix-claude adds plugins (skills, package, and settings bundled together)
+  programs.claude-code.plugins.persist = {
+    description = "Persistent coding sessions";
+    skills = builtins.attrValues persist.skills;
+    package = persistPkg;
+    settings = {
       hooks.Stop = [{
         matcher = "";
-        hooks = [{ type = "command"; command = "${persist-pkg}/bin/persist hook"; }];
+        hooks = [{ type = "command"; command = "${persistPkg}/bin/persist hook"; }];
       }];
     };
   };
 }
 ```
+
+Plugin settings are deep-merged into `programs.claude-code.settings`. List values like `hooks.Stop` concatenate, so plugin hooks and user hooks both end up in the final `settings.json`.
 
 ### Standalone (coding-cave, scripts)
 
@@ -77,10 +89,22 @@ Copy the output into `~/.claude/` however you like.
 
 ## Options
 
+### Home-manager module (plugins)
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enable` | bool | `false` | Enable config management |
-| `package` | package or null | `null` | Claude Code package to install |
+| `plugins` | attrset of submodule | `{}` | Plugins installed via Claude's plugin system |
+| `plugins.<name>.description` | string | `""` | Plugin description for plugin.json |
+| `plugins.<name>.skills` | list of path | `[]` | Skill directories (containing SKILL.md) |
+| `plugins.<name>.package` | package or null | `null` | Plugin package, added to home.packages |
+| `plugins.<name>.settings` | attrset | `{}` | Settings deep-merged into programs.claude-code.settings |
+
+Core options (`enable`, `package`, `settings`, `memory`, `commands`, `skills`, `mcpServers`, `skipOnboarding`, `dotClaudeJson`) are provided by the built-in `programs.claude-code` module.
+
+### `mkClaudeConfig` (standalone)
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
 | `plugins` | attrset of { description, skills } | `{}` | Plugins installed via Claude's plugin system |
 | `skills` | list of path | `[]` | Bare skills installed to ~/.claude/skills/ |
 | `commands` | list of path | `[]` | Flat markdown command files |
