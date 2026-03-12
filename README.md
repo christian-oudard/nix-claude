@@ -18,9 +18,6 @@ nix-claude adds plugin support alongside the built-in `programs.claude-code` mod
 
 ```nix
 { nix-claude, persist, ... }:
-let
-  persistPkg = persist.packages.${system}.default;
-in
 {
   imports = [ nix-claude.homeManagerModules.default ];
 
@@ -46,18 +43,8 @@ in
     };
   };
 
-  # nix-claude adds plugins (skills, package, and settings bundled together)
-  programs.claude-code.plugins.persist = {
-    description = "Persistent coding sessions";
-    skills = builtins.attrValues persist.skills;
-    package = persistPkg;
-    settings = {
-      hooks.Stop = [{
-        matcher = "";
-        hooks = [{ type = "command"; command = "${persistPkg}/bin/persist hook"; }];
-      }];
-    };
-  };
+  # Plugin flakes export a ready-made config attrset
+  programs.claude-code.plugins.persist = persist.plugin.${system};
 }
 ```
 
@@ -70,10 +57,7 @@ let
   claudeConfig = nix-claude.lib.mkClaudeConfig {
     inherit pkgs;
     skipOnboarding = true;
-    plugins.persist = {
-      description = "Persistent coding sessions";
-      skills = builtins.attrValues persist.skills;
-    };
+    plugins.persist = persist.plugin.${system};
     memory.fragments = [ ./instructions.md ];
     mcpServers.github = { command = "..."; args = [ "stdio" ]; };
   };
@@ -124,16 +108,42 @@ Core options (`enable`, `package`, `settings`, `memory`, `commands`, `skills`, `
 
 ## Writing a plugin flake
 
-A Claude Code plugin flake should export:
+A Claude Code plugin flake should export three things:
+
+- `packages.<system>.default` -- the plugin binary
+- `skills` -- an attrset of skill directory paths (each containing SKILL.md)
+- `plugin.<system>` -- a ready-made nix-claude config attrset
+
+The `plugin` output bundles description, skills, package, and settings so consumers can use it directly:
 
 ```nix
 {
-  packages.${system}.default = pkgs.buildSomething { ... };  # the binary
+  packages = eachSystem (system: {
+    default = pkgs.buildSomething { ... };
+  });
+
   skills = {
-    my-skill = ./skills/my-skill;       # directories with SKILL.md
+    my-skill = ./skills/my-skill;
     my-other-skill = ./skills/my-other-skill;
   };
+
+  plugin = eachSystem (system:
+    let pkg = self.packages.${system}.default; in {
+      description = "What this plugin does";
+      skills = builtins.attrValues self.skills;
+      package = pkg;
+      settings.hooks.Stop = [{
+        matcher = "";
+        hooks = [{ type = "command"; command = "${pkg}/bin/my-tool hook"; }];
+      }];
+    });
 }
+```
+
+Consumers then use a single line:
+
+```nix
+plugins.persist = persist.plugin.${system};
 ```
 
 See `examples/persist/` for a real-world example using [persist](https://github.com/christian-oudard/persist).

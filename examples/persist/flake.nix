@@ -11,23 +11,13 @@
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
-      persistPkg = persist.packages.${system}.default;
     in
     {
       # Option A: standalone derivation (for coding-cave or manual install)
       packages.${system}.claude-config = nix-claude.lib.mkClaudeConfig {
         inherit pkgs;
         skipOnboarding = true;
-        plugins.persist = {
-          description = "Persistent coding sessions for Claude Code";
-          skills = builtins.attrValues persist.skills;
-        };
-        settings = {
-          hooks.Stop = [{
-            matcher = "";
-            hooks = [{ type = "command"; command = "${persistPkg}/bin/persist hook"; }];
-          }];
-        };
+        plugins.persist = persist.plugin.${system};
       };
 
       # Option B: home-manager module config (for NixOS users)
@@ -41,17 +31,7 @@
       #     skipOnboarding = true;
       #   };
       #
-      #   # nix-claude adds plugin support (package + settings bundled with the plugin)
-      #   programs.claude-code.plugins.persist = {
-      #     description = "Persistent coding sessions for Claude Code";
-      #     skills = builtins.attrValues persist.skills;
-      #     package = persistPkg;
-      #     settings = {
-      #       hooks.Stop = [{
-      #         matcher = "";
-      #         hooks = [{ type = "command"; command = "${persistPkg}/bin/persist hook"; }];
-      #       }];
-      #     };
-      #   };
+      #   # Plugin flakes export a ready-made config attrset
+      #   programs.claude-code.plugins.persist = persist.plugin.${system};
     };
 }

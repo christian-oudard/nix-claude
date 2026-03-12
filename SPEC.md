@@ -213,16 +213,27 @@ Plugin flakes export:
 
 - `packages.<system>.default` -- the plugin binary (if any)
 - `skills.<name>` -- paths to skill directories
+- `plugin.<system>` -- a ready-made nix-claude config attrset (description, skills, package, settings)
 
-Consumers wire them up via the `plugins` option, which handles skills, package, and settings together:
+The `plugin` output bundles everything a consumer needs:
 
 ```nix
-programs.claude-code.plugins.persist = {
-  description = "Persistent coding sessions";
-  skills = builtins.attrValues persist.skills;
-  package = persistPkg;
-  settings.hooks.Stop = [{ ... }];
-};
+plugin = eachSystem (system:
+  let pkg = self.packages.${system}.default; in {
+    description = "Persistent coding sessions for Claude Code";
+    skills = builtins.attrValues self.skills;
+    package = pkg;
+    settings.hooks.Stop = [{
+      matcher = "";
+      hooks = [{ type = "command"; command = "${pkg}/bin/persist hook"; }];
+    }];
+  });
+```
+
+Consumers use a single line:
+
+```nix
+plugins.persist = persist.plugin.${system};
 ```
 
 ### Authentication is out of scope
