@@ -27,13 +27,8 @@ let
     lib.optional (pluginCfg.package != null) pluginCfg.package
   ) cfg);
 
-  # Deep-merge settings from all plugins, plus enabledPlugins entries
+  # Deep-merge settings from all plugins
   pluginSettings = lib.mapAttrsToList (_: pluginCfg: pluginCfg.settings) cfg;
-  enabledPluginsSettings = {
-    enabledPlugins = lib.mapAttrs' (name: _:
-      lib.nameValuePair "${name}@nix-claude" true
-    ) cfg;
-  };
 
   # Manifest-based install: clean old entries, copy new ones, write manifest
   installWithManifest = { targetDir, sourceDir, copyCmd ? null }:
@@ -57,6 +52,7 @@ let
       fi
       manifest=""
       for item in "${sourceDir}/"*; do
+        [ -e "$item" ] || continue
         name="$(basename "$item")"
         ${if copyCmd != null then copyCmd else defaultCopy}
         manifest="$manifest$name"$'\n'
@@ -73,16 +69,16 @@ in
           type = lib.types.nullOr lib.types.path;
           default = null;
           description = ''
-            Path to an existing plugin directory. When set, the directory is
-            copied as-is into the plugin cache. The directory should contain
-            .claude-plugin/plugin.json and any skills/, commands/, agents/.
+            Path to an existing plugin directory. When set, skills and commands
+            are extracted and installed as bare skills/commands. The directory
+            should contain skills/<name>/SKILL.md and/or commands/<name>.md.
             When set, description and skills options are ignored.
           '';
         };
         description = lib.mkOption {
           type = lib.types.str;
           default = "";
-          description = "Plugin description for plugin.json.";
+          description = "Plugin description (used when building from components).";
         };
         skills = lib.mkOption {
           type = lib.types.listOf lib.types.path;
@@ -107,48 +103,48 @@ in
     });
     default = {};
     description = ''
-      Plugins to install via the Claude Code plugin system.
-      Each plugin is registered in installed_plugins.json under the
-      nix-claude virtual marketplace, with its skills installed to
-      the plugin cache directory.
+      Plugins to install for Claude Code. Skills are installed as bare
+      skills to ~/.claude/skills/ (auto-discovered by Claude Code).
+      Commands are installed to ~/.claude/commands/.
 
-      Use src to install a pre-built plugin directory (e.g. from
-      claude-plugins-official). For settings, memory, skills, commands,
-      and MCP servers, use home-manager's built-in options instead.
+      Use src to install from a pre-built plugin directory (e.g. from
+      claude-plugins-official). Skills and commands are extracted automatically.
     '';
   };
 
   config = lib.mkIf hasPlugins {
     home.packages = pluginPackages;
 
-    programs.claude-code.settings = lib.mkMerge (pluginSettings ++ [ enabledPluginsSettings ]);
+    programs.claude-code.settings = lib.mkMerge pluginSettings;
 
     home.activation.nixClaudePlugins = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-      ${installWithManifest {
-        targetDir = "${claudeDir}/plugins/cache/nix-claude";
-        sourceDir = "${configDrv}/plugins/cache/nix-claude";
-        copyCmd = ''
-          rm -rf "${claudeDir}/plugins/cache/nix-claude/$name"
-          cp -r "$item" "${claudeDir}/plugins/cache/nix-claude/$name"
-          chmod -R u+w "${claudeDir}/plugins/cache/nix-claude/$name"
-        '';
-      }}
+      # Install skills
+      if [ -d "${configDrv}/skills" ]; then
+        ${installWithManifest {
+          targetDir = "${claudeDir}/skills";
+          sourceDir = "${configDrv}/skills";
+          copyCmd = ''
+            rm -rf "${claudeDir}/skills/$name"
+            cp -r "$item" "${claudeDir}/skills/$name"
+            chmod -R u+w "${claudeDir}/skills/$name"
+          '';
+        }}
+      fi
 
-      # Merge installed_plugins.json: replace __PLUGINS_DIR__ placeholder, then merge
-      nix_plugins="$(${pkgs.jq}/bin/jq --arg dir "${claudeDir}/plugins" \
-        'walk(if type == "string" then gsub("__PLUGINS_DIR__"; $dir) else . end)' \
-        "${configDrv}/plugins/installed_plugins.json")"
+      # Install commands
+      if [ -d "${configDrv}/commands" ]; then
+        ${installWithManifest {
+          targetDir = "${claudeDir}/commands";
+          sourceDir = "${configDrv}/commands";
+        }}
+      fi
 
+      # Clean up stale plugin cache from previous nix-claude versions
+      rm -rf "${claudeDir}/plugins/cache/nix-claude"
       if [ -f "${claudeDir}/plugins/installed_plugins.json" ]; then
-        existing="$(cat "${claudeDir}/plugins/installed_plugins.json")"
-        printf '%s\n%s' "$existing" "$nix_plugins" | \
-          ${pkgs.jq}/bin/jq -s '
-            .[0] as $existing | .[1] as $new |
-            $existing * { plugins: ($existing.plugins // {} | to_entries | map(select(.key | endswith("@nix-claude") | not)) | from_entries) * $new.plugins }
-          ' > "${claudeDir}/plugins/installed_plugins.json.tmp"
+        ${pkgs.jq}/bin/jq 'if .plugins then .plugins |= with_entries(select(.key | endswith("@nix-claude") | not)) else . end' \
+          "${claudeDir}/plugins/installed_plugins.json" > "${claudeDir}/plugins/installed_plugins.json.tmp"
         mv "${claudeDir}/plugins/installed_plugins.json.tmp" "${claudeDir}/plugins/installed_plugins.json"
-      else
-        printf '%s' "$nix_plugins" > "${claudeDir}/plugins/installed_plugins.json"
       fi
     '';
   };

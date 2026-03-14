@@ -10,7 +10,8 @@ nix-claude manages plugins and configuration extensions. It does not package the
 
 ## What nix-claude manages
 
-- Plugins (installed through Claude Code's plugin system with full metadata)
+- Plugin skills (installed as bare skills to `~/.claude/skills/`, auto-discovered by Claude Code)
+- Plugin commands (installed to `~/.claude/commands/`)
 - Plugin packages (collected and added to `home.packages`)
 - Plugin settings (deep-merged into `programs.claude-code.settings`)
 
@@ -23,8 +24,6 @@ Via `mkClaudeConfig` (standalone use):
 
 ## Architecture
 
-Two interfaces:
-
 ```
                         nix-claude
                        /          \
@@ -35,7 +34,7 @@ Two interfaces:
                  |                      |
      + home.packages             /nix/store/...-claude-config/
      + programs.claude-code.settings
-     + activation script (plugin cache)
+     + activation script (skills + commands)
 ```
 
 ### `lib.mkClaudeConfig`
@@ -76,13 +75,10 @@ Output derivation:
 
 ```
 $out/
-  plugins/
-    cache/nix-claude/persist/<version>/
-      .claude-plugin/plugin.json
-      skills/persist/SKILL.md
-      skills/persist-status/SKILL.md
-      skills/persist-stop/SKILL.md
-    installed_plugins.json
+  skills/
+    persist/SKILL.md
+    persist-status/SKILL.md
+    persist-stop/SKILL.md
   commands/
     quick-review.md
   CLAUDE.md
@@ -119,8 +115,8 @@ programs.claude-code.plugins.persist = {
 
 The module:
 
-1. Installs plugin skills to the plugin cache via activation script
-2. Merges `installed_plugins.json` for plugin registration
+1. Installs skills as bare skills to `~/.claude/skills/` via activation script
+2. Installs commands to `~/.claude/commands/` via activation script
 3. Collects `package` from each plugin into `home.packages`
 4. Deep-merges `settings` from each plugin into `programs.claude-code.settings`
 
@@ -132,17 +128,17 @@ Since `programs.claude-code.settings` uses `pkgs.formats.json` type, list values
 
 ```
 programs.claude-code.plugins : attrset of {
-  src : path | null                    # existing plugin directory (copied as-is)
-  description : string                 # plugin.json description (ignored if src set)
+  src : path | null                    # existing plugin directory (skills/commands extracted)
+  description : string                 # plugin description (ignored if src set)
   skills : list of path                # skill directories with SKILL.md (ignored if src set)
   package : package | null             # optional; added to home.packages
   settings : attrset                   # deep-merged into programs.claude-code.settings
 }
 ```
 
-When `src` is set, the entire directory is copied into the plugin cache. This is
-useful for installing pre-built plugins (e.g. from `claude-plugins-official`).
-When `src` is not set, the plugin is assembled from `description` and `skills`.
+When `src` is set, skills and commands are extracted from the directory and installed
+as bare skills/commands. This is useful for installing pre-built plugins (e.g. from
+`claude-plugins-official`). When `src` is not set, skills are taken from the `skills` list.
 
 ### `mkClaudeConfig` (standalone)
 
@@ -150,9 +146,9 @@ When `src` is not set, the plugin is assembled from `description` and `skills`.
 mkClaudeConfig {
   pkgs : pkgs                            # required
 
-  plugins : attrset of {                 # installed via Claude's plugin system
-    src : path | null                    # existing plugin directory (copied as-is)
-    description : string                 # plugin.json description (ignored if src set)
+  plugins : attrset of {                 # skills installed as bare skills
+    src : path | null                    # existing plugin directory (skills/commands extracted)
+    description : string                 # plugin description (ignored if src set)
     skills : list of path                # skill directories with SKILL.md (ignored if src set)
   }
 
@@ -174,11 +170,11 @@ mkClaudeConfig {
 
 ## Design decisions
 
-### Plugins use Claude Code's native plugin system
+### Skills use bare skill directories
 
-nix-claude acts as a virtual marketplace called `nix-claude`. Each plugin is installed to `~/.claude/plugins/cache/nix-claude/<name>/<version>/` with a `.claude-plugin/plugin.json` manifest and `skills/` directory. Plugins are registered in `installed_plugins.json` as `<name>@nix-claude` with user scope.
+nix-claude installs plugin skills as bare skills to `~/.claude/skills/<name>/`. Claude Code auto-discovers skill directories containing `SKILL.md` in this location. This is simpler and more reliable than the plugin cache system, which requires a recognized marketplace.
 
-This means nix-claude-installed plugins look identical to marketplace-installed ones. The version is a 12-character hash derived from the plugin name and skill paths, providing content-based versioning.
+The `plugins` option in mkClaudeConfig extracts skills from plugin sources and outputs them to `$out/skills/`. The home-manager activation script copies them to `~/.claude/skills/` with manifest-based tracking for cleanup.
 
 ### Home-manager module is plugins-only
 
@@ -193,7 +189,7 @@ Claude Code uses two separate directories:
 - `~/.claude/skills/<name>/SKILL.md` -- directory-based skills (slash commands)
 - `~/.claude/commands/<name>.md` -- flat markdown commands
 
-The `plugins` option installs skills through the plugin system (`~/.claude/plugins/cache/`). In standalone mode, the `skills` option installs bare skills to `~/.claude/skills/` and the `commands` option installs flat commands to `~/.claude/commands/`.
+The `plugins` option installs skills to `~/.claude/skills/`. In standalone mode, the `skills` option also installs bare skills to `~/.claude/skills/` and the `commands` option installs flat commands to `~/.claude/commands/`.
 
 ### `~/.claude.json` is assembled from multiple sources (standalone)
 
@@ -256,23 +252,23 @@ Per-project config is team-managed (committed to git), not generated from one pe
 backups/          # runtime
 cache/            # runtime
 CLAUDE.md         # managed by built-in module or mkClaudeConfig
-commands/         # managed by built-in module or mkClaudeConfig
+commands/         # managed by nix-claude (plugin commands) or mkClaudeConfig
 debug/            # runtime
 file-history/     # runtime
 history.jsonl     # runtime
 paste-cache/      # runtime
-plugins/          # managed by nix-claude (plugin cache + installed_plugins.json)
+plugins/          # runtime (marketplace plugins only)
 projects/         # runtime (per-project memory)
 session-env/      # runtime
 settings.json     # managed by built-in module or mkClaudeConfig
 shell-snapshots/  # runtime
-skills/           # managed by built-in module or mkClaudeConfig
+skills/           # managed by nix-claude (plugin skills) or mkClaudeConfig
 tasks/            # runtime
 telemetry/        # runtime
 todos/            # runtime
 ```
 
-nix-claude home-manager module manages: `plugins/cache/nix-claude/`, `plugins/installed_plugins.json`, and contributes to `programs.claude-code.settings` and `home.packages`.
+nix-claude home-manager module manages: `skills/` (bare skills from plugins), `commands/` (from src-based plugins), and contributes to `programs.claude-code.settings` and `home.packages`.
 
 ## File layout
 

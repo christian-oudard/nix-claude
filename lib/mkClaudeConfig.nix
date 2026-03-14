@@ -56,68 +56,43 @@ let
     if settings == {} then null
     else builtins.toJSON settings;
 
-  # Version hash: 12-char hash derived from plugin content paths
-  pluginVersion = name: cfg:
-    let
-      srcPath = if cfg ? src && cfg.src != null then [ (toString cfg.src) ] else [];
-      skillPaths = map toString (cfg.skills or []);
-      hash = builtins.hashString "sha256" (builtins.concatStringsSep "\n" ([ name ] ++ srcPath ++ skillPaths));
-    in
-    builtins.substring 0 12 hash;
-
-  # Build installed_plugins.json
-  pluginEntries = lib.mapAttrs (name: cfg:
-    let version = pluginVersion name cfg; in
-    [{
-      scope = "user";
-      # Placeholder path -- activation script fills in the real absolute path
-      installPath = "__PLUGINS_DIR__/cache/nix-claude/${name}/${version}";
-      inherit version;
-      installedAt = "1970-01-01T00:00:00.000Z";
-      lastUpdated = "1970-01-01T00:00:00.000Z";
-    }]
-  ) plugins;
-
-  installedPluginsJson =
-    if plugins == {} then null
-    else builtins.toJSON {
-      version = 2;
-      plugins = lib.mapAttrs' (name: value:
-        lib.nameValuePair "${name}@nix-claude" value
-      ) pluginEntries;
-    };
-
-  # Install plugin cache directories
+  # Install skills and commands from plugins to $out/skills/ and $out/commands/
+  # Plugins no longer use the plugin cache — skills are installed as bare skills
+  # that Claude Code auto-discovers from ~/.claude/skills/.
   installPlugins = lib.concatStringsSep "\n" (lib.mapAttrsToList (name: cfg:
     let
-      version = pluginVersion name cfg;
-      pluginDir = "$out/plugins/cache/nix-claude/${name}/${version}";
-      description = cfg.description or "Installed via nix-claude";
-      pluginJson = builtins.toJSON {
-        inherit name description;
-      };
       hasSrc = cfg ? src && cfg.src != null;
     in
     if hasSrc then
-      # Copy the entire plugin directory as-is (official plugins, etc.)
-      # Use tar to reset permissions from the read-only nix store.
+      # Extract skills and commands from an existing plugin directory
       ''
-        mkdir -p "${pluginDir}"
-        tar -C "${cfg.src}" -cf - . | tar -C "${pluginDir}" -xf - --no-same-permissions
+        if [ -d "${cfg.src}/skills" ]; then
+          for skill in "${cfg.src}/skills/"*/; do
+            if [ -d "$skill" ]; then
+              sname="$(basename "$skill")"
+              mkdir -p "$out/skills/$sname"
+              cp -r "$skill"* "$out/skills/$sname/"
+            fi
+          done
+        fi
+        if [ -d "${cfg.src}/commands" ]; then
+          for cmd in "${cfg.src}/commands/"*.md; do
+            if [ -f "$cmd" ]; then
+              mkdir -p "$out/commands"
+              cp "$cmd" "$out/commands/"
+            fi
+          done
+        fi
       ''
     else
-      # Build from components
-      ''
-        mkdir -p "${pluginDir}/.claude-plugin"
-        cp ${pkgs.writeText "plugin-${name}.json" pluginJson} "${pluginDir}/.claude-plugin/plugin.json"
-        ${lib.concatMapStringsSep "\n" (skill:
-          let sname = baseName skill; in
-          ''
-            mkdir -p "${pluginDir}/skills/${sname}"
-            cp -r "${skill}/"* "${pluginDir}/skills/${sname}/"
-          ''
-        ) (cfg.skills or [])}
-      ''
+      # Install individual skill directories
+      lib.concatMapStringsSep "\n" (skill:
+        let sname = baseName skill; in
+        ''
+          mkdir -p "$out/skills/${sname}"
+          cp -r "${skill}/"* "$out/skills/${sname}/"
+        ''
+      ) (cfg.skills or [])
   ) plugins);
 
   # Install bare skills (not through plugin system)
@@ -149,10 +124,6 @@ pkgs.runCommand "claude-config" {} ''
   ${installPlugins}
   ${installSkills}
   ${installCommands}
-
-  ${lib.optionalString (installedPluginsJson != null) ''
-    cp ${pkgs.writeText "installed_plugins.json" installedPluginsJson} "$out/plugins/installed_plugins.json"
-  ''}
 
   ${lib.optionalString (claudeMd != null) ''
     cp ${pkgs.writeText "CLAUDE.md" claudeMd} "$out/CLAUDE.md"

@@ -131,16 +131,11 @@ in
     mkTest "plugin-install" {
       inherit drv;
       script = ''
-        test -d "${drv}/plugins/cache/nix-claude/test-plugin"
-        found=$(find "${drv}/plugins/cache/nix-claude/test-plugin" -name plugin.json)
-        test -n "$found"
-        ${pkgs.jq}/bin/jq -e '.name == "test-plugin"' "$found"
-        ${pkgs.jq}/bin/jq -e '.description == "A test plugin"' "$found"
-        found=$(find "${drv}/plugins/cache/nix-claude/test-plugin" -name SKILL.md)
-        test -n "$found"
-        test -f "${drv}/plugins/installed_plugins.json"
-        ${pkgs.jq}/bin/jq -e '.version == 2' "${drv}/plugins/installed_plugins.json"
-        ${pkgs.jq}/bin/jq -e '.plugins["test-plugin@nix-claude"][0].scope == "user"' "${drv}/plugins/installed_plugins.json"
+        # Skills installed as bare skills
+        test -d "${drv}/skills/test-skill"
+        test -f "${drv}/skills/test-skill/SKILL.md"
+        # No plugin cache or installed_plugins.json
+        ! test -d "${drv}/plugins"
       '';
     };
 
@@ -154,22 +149,13 @@ in
     mkTest "plugin-src" {
       inherit drv;
       script = ''
-        # Plugin directory exists in cache
-        test -d "${drv}/plugins/cache/nix-claude/src-plugin"
-        # plugin.json was copied from src
-        found=$(find "${drv}/plugins/cache/nix-claude/src-plugin" -name plugin.json)
-        test -n "$found"
-        ${pkgs.jq}/bin/jq -e '.name == "src-plugin"' "$found"
-        ${pkgs.jq}/bin/jq -e '.description == "A plugin installed from src"' "$found"
-        # Commands were copied
-        found=$(find "${drv}/plugins/cache/nix-claude/src-plugin" -name my-command.md)
-        test -n "$found"
-        # Skills were copied
-        found=$(find "${drv}/plugins/cache/nix-claude/src-plugin" -path "*/skills/my-skill/SKILL.md")
-        test -n "$found"
-        # Registered in installed_plugins.json
-        test -f "${drv}/plugins/installed_plugins.json"
-        ${pkgs.jq}/bin/jq -e '.plugins["src-plugin@nix-claude"][0].scope == "user"' "${drv}/plugins/installed_plugins.json"
+        # Skills extracted from src to bare skills
+        test -d "${drv}/skills/my-skill"
+        test -f "${drv}/skills/my-skill/SKILL.md"
+        # Commands extracted from src
+        test -f "${drv}/commands/my-command.md"
+        # No plugin cache or installed_plugins.json
+        ! test -d "${drv}/plugins"
       '';
     };
 
@@ -202,10 +188,11 @@ in
     mkTest "full-config" {
       inherit drv;
       script = ''
-        # Plugin
-        test -f "${drv}/plugins/installed_plugins.json"
-        found=$(find "${drv}/plugins/cache/nix-claude/test-plugin" -name SKILL.md)
-        test -n "$found"
+        # Plugin skills as bare skills
+        test -d "${drv}/skills/test-skill"
+        test -f "${drv}/skills/test-skill/SKILL.md"
+        # No plugin cache
+        ! test -d "${drv}/plugins"
         # Commands
         test -f "${drv}/commands/test-command.md"
         test -f "${drv}/commands/alpha.md"
