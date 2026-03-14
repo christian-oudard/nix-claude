@@ -27,8 +27,13 @@ let
     lib.optional (pluginCfg.package != null) pluginCfg.package
   ) cfg);
 
-  # Deep-merge settings from all plugins
+  # Deep-merge settings from all plugins, plus enabledPlugins entries
   pluginSettings = lib.mapAttrsToList (_: pluginCfg: pluginCfg.settings) cfg;
+  enabledPluginsSettings = {
+    enabledPlugins = lib.mapAttrs' (name: _:
+      lib.nameValuePair "${name}@nix-claude" true
+    ) cfg;
+  };
 
   # Manifest-based install: clean old entries, copy new ones, write manifest
   installWithManifest = { targetDir, sourceDir, copyCmd ? null }:
@@ -116,7 +121,7 @@ in
   config = lib.mkIf hasPlugins {
     home.packages = pluginPackages;
 
-    programs.claude-code.settings = lib.mkMerge pluginSettings;
+    programs.claude-code.settings = lib.mkMerge (pluginSettings ++ [ enabledPluginsSettings ]);
 
     home.activation.nixClaudePlugins = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       ${installWithManifest {
