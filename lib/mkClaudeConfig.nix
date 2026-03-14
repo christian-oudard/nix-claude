@@ -56,11 +56,12 @@ let
     if settings == {} then null
     else builtins.toJSON settings;
 
-  # Version hash: 12-char hash derived from plugin skill paths
+  # Version hash: 12-char hash derived from plugin content paths
   pluginVersion = name: cfg:
     let
+      srcPath = if cfg ? src && cfg.src != null then [ (toString cfg.src) ] else [];
       skillPaths = map toString (cfg.skills or []);
-      hash = builtins.hashString "sha256" (builtins.concatStringsSep "\n" ([ name ] ++ skillPaths));
+      hash = builtins.hashString "sha256" (builtins.concatStringsSep "\n" ([ name ] ++ srcPath ++ skillPaths));
     in
     builtins.substring 0 12 hash;
 
@@ -95,18 +96,28 @@ let
       pluginJson = builtins.toJSON {
         inherit name description;
       };
+      hasSrc = cfg ? src && cfg.src != null;
     in
-    ''
-      mkdir -p "${pluginDir}/.claude-plugin"
-      cp ${pkgs.writeText "plugin-${name}.json" pluginJson} "${pluginDir}/.claude-plugin/plugin.json"
-      ${lib.concatMapStringsSep "\n" (skill:
-        let sname = baseName skill; in
-        ''
-          mkdir -p "${pluginDir}/skills/${sname}"
-          cp -r "${skill}/"* "${pluginDir}/skills/${sname}/"
-        ''
-      ) (cfg.skills or [])}
-    ''
+    if hasSrc then
+      # Copy the entire plugin directory as-is (official plugins, etc.)
+      # Use tar to reset permissions from the read-only nix store.
+      ''
+        mkdir -p "${pluginDir}"
+        tar -C "${cfg.src}" -cf - . | tar -C "${pluginDir}" -xf - --no-same-permissions
+      ''
+    else
+      # Build from components
+      ''
+        mkdir -p "${pluginDir}/.claude-plugin"
+        cp ${pkgs.writeText "plugin-${name}.json" pluginJson} "${pluginDir}/.claude-plugin/plugin.json"
+        ${lib.concatMapStringsSep "\n" (skill:
+          let sname = baseName skill; in
+          ''
+            mkdir -p "${pluginDir}/skills/${sname}"
+            cp -r "${skill}/"* "${pluginDir}/skills/${sname}/"
+          ''
+        ) (cfg.skills or [])}
+      ''
   ) plugins);
 
   # Install bare skills (not through plugin system)

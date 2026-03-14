@@ -1,0 +1,8 @@
+{
+  "name": "src-plugin",
+  "description": "A plugin installed from src",
+  "author": {
+    "name": "Test",
+    "email": "test@example.com"
+  }
+}

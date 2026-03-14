@@ -132,12 +132,17 @@ Since `programs.claude-code.settings` uses `pkgs.formats.json` type, list values
 
 ```
 programs.claude-code.plugins : attrset of {
-  description : string                 # plugin.json description
-  skills : list of path                # skill directories with SKILL.md
+  src : path | null                    # existing plugin directory (copied as-is)
+  description : string                 # plugin.json description (ignored if src set)
+  skills : list of path                # skill directories with SKILL.md (ignored if src set)
   package : package | null             # optional; added to home.packages
   settings : attrset                   # deep-merged into programs.claude-code.settings
 }
 ```
+
+When `src` is set, the entire directory is copied into the plugin cache. This is
+useful for installing pre-built plugins (e.g. from `claude-plugins-official`).
+When `src` is not set, the plugin is assembled from `description` and `skills`.
 
 ### `mkClaudeConfig` (standalone)
 
@@ -146,8 +151,9 @@ mkClaudeConfig {
   pkgs : pkgs                            # required
 
   plugins : attrset of {                 # installed via Claude's plugin system
-    description : string                 # plugin.json description
-    skills : list of path                # skill directories with SKILL.md
+    src : path | null                    # existing plugin directory (copied as-is)
+    description : string                 # plugin.json description (ignored if src set)
+    skills : list of path                # skill directories with SKILL.md (ignored if src set)
   }
 
   skills : list of path                  # bare skills in ~/.claude/skills/

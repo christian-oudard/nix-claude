@@ -16,6 +16,16 @@ in
     plugins = mkOption {
       type = types.attrsOf (types.submodule {
         options = {
+          src = mkOption {
+            type = types.nullOr types.path;
+            default = null;
+            description = ''
+              Path to an existing plugin directory. When set, the directory is
+              copied as-is into the plugin cache. The directory should contain
+              .claude-plugin/plugin.json and any skills/, commands/, agents/.
+              When set, description and skills options are ignored.
+            '';
+          };
           description = mkOption {
             type = types.str;
             default = "";
@@ -34,6 +44,10 @@ in
         Each plugin is registered in installed_plugins.json under the
         nix-claude virtual marketplace, with its skills installed to
         the plugin cache directory.
+
+        Use src to install a pre-built plugin directory (e.g. from
+        claude-plugins-official), or use description + skills to
+        build a plugin from components.
       '';
     };
 

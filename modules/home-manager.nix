@@ -6,10 +6,14 @@ let
 
   hasPlugins = cfg != {};
 
-  # Extract only the fields mkClaudeConfig expects (description, skills)
-  pluginsForDrv = lib.mapAttrs (name: pluginCfg: {
-    inherit (pluginCfg) description skills;
-  }) cfg;
+  # Extract only the fields mkClaudeConfig expects (src, description, skills)
+  pluginsForDrv = lib.mapAttrs (name: pluginCfg:
+    if pluginCfg.src != null then {
+      inherit (pluginCfg) src;
+    } else {
+      inherit (pluginCfg) description skills;
+    }
+  ) cfg;
 
   configDrv = mkClaudeConfig {
     inherit pkgs;
@@ -60,6 +64,16 @@ in
   options.programs.claude-code.plugins = lib.mkOption {
     type = lib.types.attrsOf (lib.types.submodule {
       options = {
+        src = lib.mkOption {
+          type = lib.types.nullOr lib.types.path;
+          default = null;
+          description = ''
+            Path to an existing plugin directory. When set, the directory is
+            copied as-is into the plugin cache. The directory should contain
+            .claude-plugin/plugin.json and any skills/, commands/, agents/.
+            When set, description and skills options are ignored.
+          '';
+        };
         description = lib.mkOption {
           type = lib.types.str;
           default = "";
@@ -93,8 +107,9 @@ in
       nix-claude virtual marketplace, with its skills installed to
       the plugin cache directory.
 
-      For settings, memory, skills, commands, and MCP servers, use
-      home-manager's built-in programs.claude-code options instead.
+      Use src to install a pre-built plugin directory (e.g. from
+      claude-plugins-official). For settings, memory, skills, commands,
+      and MCP servers, use home-manager's built-in options instead.
     '';
   };
 
