@@ -10,6 +10,7 @@
     in
     {
       lib.mkClaudeConfig = import ./lib/mkClaudeConfig.nix { inherit lib; };
+      lib.build = import ./lib/build.nix { inherit lib; };
       lib.options = import ./lib/options.nix { inherit lib; };
 
       homeManagerModules.default = import ./modules/home-manager.nix;
@@ -19,8 +20,9 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           mkClaudeConfig = import ./lib/mkClaudeConfig.nix { inherit lib; };
+          build = import ./lib/build.nix { inherit lib; };
         in
-        import ./tests { inherit pkgs lib mkClaudeConfig; }
+        import ./tests { inherit pkgs lib mkClaudeConfig build; }
       );
     };
 }

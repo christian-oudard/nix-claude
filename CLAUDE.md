@@ -5,6 +5,7 @@ Declarative Claude Code configuration via Nix. Pure Nix -- no runtime dependenci
 ## Structure
 
 - `lib/mkClaudeConfig.nix` -- core function: takes `{ pkgs, plugins, skills, commands, ... }`, returns a derivation
+- `lib/build.nix` -- simplified builder for coding-cave: takes `{ pkgs, plugins, settings, skills, statusline }`, returns a derivation
 - `lib/options.nix` -- shared NixOS/home-manager option type definitions
 - `modules/home-manager.nix` -- home-manager module using `programs.claude-code` namespace
 - `tests/default.nix` -- nix flake checks (run with `nix flake check`)

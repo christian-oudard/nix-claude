@@ -86,6 +86,45 @@ $out/
   settings.json
 ```
 
+### `lib.build`
+
+Simplified function producing a derivation for coding-cave consumption. Takes a flat list of plugins (already resolved from flake inputs), merges their settings and skills, and outputs a self-contained derivation.
+
+```nix
+nix-claude.lib.build {
+  inherit pkgs;
+  plugins = [ persist ];
+  settings = {
+    permissions.allow = [ "Bash(npm:*)" ];
+  };
+  skills = {
+    my-skill = "Custom skill content...";
+  };
+  statusline = "#!/bin/bash\nread -r input\necho custom";
+}
+```
+
+Output derivation:
+
+```
+$out/
+  settings.json       # Merged from plugins + user settings
+  skills/             # Plugin skills (hash-stripped) + user inline skills
+    persist/SKILL.md
+    my-skill/SKILL.md
+  packages/           # Symlinks to plugin packages (added to PATH by consumer)
+    persist -> /nix/store/...
+  statusline.sh       # Optional statusline script
+```
+
+**Settings merging**: Plugin settings are folded left with `recursiveUpdate`, then user settings override. This means later plugins override earlier ones, and user settings override all plugins.
+
+**Plugin skills**: Each plugin's `skills` list contains store paths to directories with SKILL.md. The 33-char nix store hash prefix is stripped from directory names.
+
+**User inline skills**: Attrset of `{ name = "markdown content"; }`, written as `$out/skills/<name>/SKILL.md`. Inline skills override plugin skills with the same name.
+
+**Plugin packages**: Collected from `plugin.package` and symlinked into `$out/packages/`. The consumer (coding-cave) adds these to PATH.
+
 ### Home-manager module
 
 The home-manager module is plugins-only. It works alongside the built-in `programs.claude-code` module (provided by home-manager or claude-code-nix), which handles settings, memory, commands, skills, MCP servers, and the Claude Code package.
@@ -139,6 +178,24 @@ programs.claude-code.plugins : attrset of {
 When `src` is set, skills and commands are extracted from the directory and installed
 as bare skills/commands. This is useful for installing pre-built plugins (e.g. from
 `claude-plugins-official`). When `src` is not set, skills are taken from the `skills` list.
+
+### `lib.build` (coding-cave)
+
+```
+build {
+  pkgs : pkgs                            # required
+
+  plugins : list of {                    # resolved plugin attrsets
+    package : derivation | null          # optional; symlinked to $out/packages/
+    settings : attrset                   # merged (folded left, user overrides)
+    skills : list of path                # store paths to skill dirs with SKILL.md
+  }
+
+  settings : attrset                     # user settings (override plugin settings)
+  skills : attrset of string             # { name = "SKILL.md content"; }
+  statusline : string | null             # optional statusline script
+}
+```
 
 ### `mkClaudeConfig` (standalone)
 

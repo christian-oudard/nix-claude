@@ -1,4 +1,4 @@
-{ pkgs, lib, mkClaudeConfig }:
+{ pkgs, lib, mkClaudeConfig, build }:
 
 let
   fixtures = ./fixtures;
@@ -170,6 +170,144 @@ in
         ! test -f "${drv}/dot-claude.json"
       '';
     };
+
+  # lib.build tests
+
+  build-empty =
+    let drv = build { inherit pkgs; }; in
+    mkTest "build-empty" {
+      inherit drv;
+      script = ''
+        test -f "${drv}/settings.json"
+        ${pkgs.jq}/bin/jq -e '. == {}' "${drv}/settings.json"
+        ! test -d "${drv}/skills"
+        ! test -d "${drv}/packages"
+        ! test -f "${drv}/statusline.sh"
+      '';
+    };
+
+  build-settings-merge =
+    let
+      plugin1 = { settings = { permissions.allow = [ "Bash" ]; foo = "from-plugin"; }; };
+      plugin2 = { settings = { permissions.deny = [ "Write" ]; }; };
+      drv = build {
+        inherit pkgs;
+        plugins = [ plugin1 plugin2 ];
+        settings = { foo = "from-user"; bar = "user-only"; };
+      };
+    in
+    mkTest "build-settings-merge" {
+      inherit drv;
+      script = ''
+        ${pkgs.jq}/bin/jq -e '.foo == "from-user"' "${drv}/settings.json"
+        ${pkgs.jq}/bin/jq -e '.permissions.allow[0] == "Bash"' "${drv}/settings.json"
+        ${pkgs.jq}/bin/jq -e '.permissions.deny[0] == "Write"' "${drv}/settings.json"
+        ${pkgs.jq}/bin/jq -e '.bar == "user-only"' "${drv}/settings.json"
+      '';
+    };
+
+  build-plugin-skills =
+    let
+      skillDir = pkgs.runCommand "test-skill" {} ''
+        mkdir -p $out
+        echo "# Plugin skill content" > $out/SKILL.md
+      '';
+      plugin = { skills = [ skillDir ]; };
+      drv = build { inherit pkgs; plugins = [ plugin ]; };
+    in
+    mkTest "build-plugin-skills" {
+      inherit drv;
+      script = ''
+        test -d "${drv}/skills/test-skill"
+        test -f "${drv}/skills/test-skill/SKILL.md"
+        grep -q "Plugin skill content" "${drv}/skills/test-skill/SKILL.md"
+      '';
+    };
+
+  build-inline-skills =
+    let
+      drv = build {
+        inherit pkgs;
+        skills = {
+          my-skill = "Custom skill content here.";
+        };
+      };
+    in
+    mkTest "build-inline-skills" {
+      inherit drv;
+      script = ''
+        test -d "${drv}/skills/my-skill"
+        test -f "${drv}/skills/my-skill/SKILL.md"
+        grep -q "Custom skill content" "${drv}/skills/my-skill/SKILL.md"
+      '';
+    };
+
+  build-packages =
+    let
+      plugin = { package = pkgs.hello; };
+      drv = build { inherit pkgs; plugins = [ plugin ]; };
+    in
+    mkTest "build-packages" {
+      inherit drv;
+      script = ''
+        test -d "${drv}/packages"
+        test -L "${drv}/packages/hello"
+        test -d "$(readlink "${drv}/packages/hello")"
+      '';
+    };
+
+  build-statusline =
+    let
+      drv = build {
+        inherit pkgs;
+        statusline = ''
+          #!/bin/bash
+          read -r input
+          echo "custom status"
+        '';
+      };
+    in
+    mkTest "build-statusline" {
+      inherit drv;
+      script = ''
+        test -f "${drv}/statusline.sh"
+        test -x "${drv}/statusline.sh"
+        grep -q "custom status" "${drv}/statusline.sh"
+      '';
+    };
+
+  build-full =
+    let
+      skillDir = pkgs.runCommand "full-test-skill" {} ''
+        mkdir -p $out
+        echo "# Full test plugin skill" > $out/SKILL.md
+      '';
+      plugin = {
+        package = pkgs.hello;
+        settings = { permissions.allow = [ "Bash" ]; };
+        skills = [ skillDir ];
+      };
+      drv = build {
+        inherit pkgs;
+        plugins = [ plugin ];
+        settings = { permissions.deny = [ "Write" ]; };
+        skills = { inline-skill = "Inline skill."; };
+        statusline = "#!/bin/bash\necho status";
+      };
+    in
+    mkTest "build-full" {
+      inherit drv;
+      script = ''
+        ${pkgs.jq}/bin/jq -e '.permissions.allow[0] == "Bash"' "${drv}/settings.json"
+        ${pkgs.jq}/bin/jq -e '.permissions.deny[0] == "Write"' "${drv}/settings.json"
+        test -d "${drv}/skills/full-test-skill"
+        test -f "${drv}/skills/inline-skill/SKILL.md"
+        test -L "${drv}/packages/hello"
+        test -x "${drv}/statusline.sh"
+      '';
+    };
+
+  # mkClaudeConfig tests
 
   full-config =
     let drv = mkClaudeConfig {
