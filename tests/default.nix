@@ -123,10 +123,9 @@ in
   plugin-install =
     let drv = mkClaudeConfig {
       inherit pkgs;
-      plugins.test-plugin = {
-        description = "A test plugin";
+      plugins = [{
         skills = [ "${fixtures}/test-skill" ];
-      };
+      }];
     }; in
     mkTest "plugin-install" {
       inherit drv;
@@ -142,9 +141,9 @@ in
   plugin-src =
     let drv = mkClaudeConfig {
       inherit pkgs;
-      plugins.src-plugin = {
+      plugins = [{
         src = "${fixtures}/src-plugin";
-      };
+      }];
     }; in
     mkTest "plugin-src" {
       inherit drv;
@@ -156,6 +155,27 @@ in
         test -f "${drv}/commands/my-command.md"
         # No plugin cache or installed_plugins.json
         ! test -d "${drv}/plugins"
+      '';
+    };
+
+  plugin-flake-input =
+    let
+      # Simulate a flake input with a `plugin` attr
+      fakeFlakeInput = {
+        plugin.${pkgs.system} = {
+          skills = [ "${fixtures}/test-skill" ];
+        };
+      };
+      drv = mkClaudeConfig {
+        inherit pkgs;
+        plugins = [ fakeFlakeInput ];
+      };
+    in
+    mkTest "plugin-flake-input" {
+      inherit drv;
+      script = ''
+        test -d "${drv}/skills/test-skill"
+        test -f "${drv}/skills/test-skill/SKILL.md"
       '';
     };
 
@@ -312,10 +332,9 @@ in
   full-config =
     let drv = mkClaudeConfig {
       inherit pkgs;
-      plugins.test-plugin = {
-        description = "Full config test plugin";
+      plugins = [{
         skills = [ "${fixtures}/test-skill" ];
-      };
+      }];
       commands = [ "${fixtures}/test-command.md" ];
       commandsDir = "${fixtures}/commands-dir";
       memory.fragments = [ "${fixtures}/fragment-a.md" "Inline fragment." ];

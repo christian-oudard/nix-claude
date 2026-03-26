@@ -14,40 +14,12 @@ in
     };
 
     plugins = mkOption {
-      type = types.attrsOf (types.submodule {
-        options = {
-          src = mkOption {
-            type = types.nullOr types.path;
-            default = null;
-            description = ''
-              Path to an existing plugin directory. When set, the directory is
-              copied as-is into the plugin cache. The directory should contain
-              .claude-plugin/plugin.json and any skills/, commands/, agents/.
-              When set, description and skills options are ignored.
-            '';
-          };
-          description = mkOption {
-            type = types.str;
-            default = "";
-            description = "Plugin description for plugin.json.";
-          };
-          skills = mkOption {
-            type = types.listOf types.path;
-            default = [];
-            description = "Skill directories (containing SKILL.md) provided by this plugin.";
-          };
-        };
-      });
-      default = {};
+      type = types.listOf types.attrs;
+      default = [];
       description = ''
-        Plugins to install via the Claude Code plugin system.
-        Each plugin is registered in installed_plugins.json under the
-        nix-claude virtual marketplace, with its skills installed to
-        the plugin cache directory.
-
-        Use src to install a pre-built plugin directory (e.g. from
-        claude-plugins-official), or use description + skills to
-        build a plugin from components.
+        Plugins to install for Claude Code. Each element is a plugin
+        attrset with optional skills, settings, package, and src fields.
+        Flake inputs with a `plugin` attr are resolved automatically.
       '';
     };
 

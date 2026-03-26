@@ -8,18 +8,25 @@
 }:
 
 let
+  # Resolve plugin: flake inputs have a `plugin` attr keyed by system
+  resolvePlugin = p:
+    if p ? plugin then p.plugin.${pkgs.system}
+    else p;
+
+  resolvedPlugins = map resolvePlugin plugins;
+
   # Merge settings: fold plugin settings left, then user settings override
-  pluginSettings = lib.foldl' lib.recursiveUpdate {} (map (p: p.settings or {}) plugins);
+  pluginSettings = lib.foldl' lib.recursiveUpdate {} (map (p: p.settings or {}) resolvedPlugins);
   mergedSettings = lib.recursiveUpdate pluginSettings settings;
   settingsJson = builtins.toJSON mergedSettings;
 
   # Collect plugin packages
   pluginPackages = lib.concatMap (p:
     if p ? package && p.package != null then [ p.package ] else []
-  ) plugins;
+  ) resolvedPlugins;
 
   # Collect all plugin skill paths
-  pluginSkills = lib.concatMap (p: p.skills or []) plugins;
+  pluginSkills = lib.concatMap (p: p.skills or []) resolvedPlugins;
 
   # Install plugin skills, stripping the 33-char nix store hash prefix from dir names
   installPluginSkills = lib.concatMapStringsSep "\n" (skill: ''

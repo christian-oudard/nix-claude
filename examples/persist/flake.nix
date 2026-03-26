@@ -17,7 +17,7 @@
       packages.${system}.claude-config = nix-claude.lib.mkClaudeConfig {
         inherit pkgs;
         skipOnboarding = true;
-        plugins.persist = persist.plugin.${system};
+        plugins = [ persist ];
       };
 
       # Option B: home-manager module config (for NixOS users)
@@ -25,13 +25,10 @@
       #
       #   imports = [ nix-claude.homeManagerModules.default ];
       #
-      #   # Built-in module handles core config
       #   programs.claude-code = {
       #     enable = true;
       #     skipOnboarding = true;
+      #     plugins = [ persist ];
       #   };
-      #
-      #   # Plugin flakes export a ready-made config attrset
-      #   programs.claude-code.plugins.persist = persist.plugin.${system};
     };
 }

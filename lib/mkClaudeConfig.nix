@@ -1,7 +1,7 @@
 { lib }:
 
 { pkgs
-, plugins ? {}
+, plugins ? []
 , skills ? []
 , commands ? []
 , commandsDir ? null
@@ -18,6 +18,13 @@ let
 
   baseName = path:
     lib.last (lib.splitString "/" (toString path));
+
+  # Resolve plugin: flake inputs have a `plugin` attr keyed by system
+  resolvePlugin = p:
+    if p ? plugin then p.plugin.${pkgs.system}
+    else p;
+
+  resolvedPlugins = map resolvePlugin plugins;
 
   readFragment = f:
     if builtins.isString f && !(lib.hasPrefix "/" f || lib.hasPrefix "/nix/store" f)
@@ -56,15 +63,12 @@ let
     if settings == {} then null
     else builtins.toJSON settings;
 
-  # Install skills and commands from plugins to $out/skills/ and $out/commands/
-  # Plugins no longer use the plugin cache — skills are installed as bare skills
-  # that Claude Code auto-discovers from ~/.claude/skills/.
-  installPlugins = lib.concatStringsSep "\n" (lib.mapAttrsToList (name: cfg:
+  # Install skills and commands from plugins
+  installPlugins = lib.concatMapStringsSep "\n" (cfg:
     let
       hasSrc = cfg ? src && cfg.src != null;
     in
     if hasSrc then
-      # Extract skills and commands from an existing plugin directory
       ''
         if [ -d "${cfg.src}/skills" ]; then
           for skill in "${cfg.src}/skills/"*/; do
@@ -85,7 +89,6 @@ let
         fi
       ''
     else
-      # Install individual skill directories
       lib.concatMapStringsSep "\n" (skill:
         let sname = baseName skill; in
         ''
@@ -93,7 +96,7 @@ let
           cp -r "${skill}/"* "$out/skills/${sname}/"
         ''
       ) (cfg.skills or [])
-  ) plugins);
+  ) resolvedPlugins;
 
   # Install bare skills (not through plugin system)
   installSkills = lib.concatMapStringsSep "\n" (skill:

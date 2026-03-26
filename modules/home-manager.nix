@@ -4,31 +4,29 @@ let
   cfg = config.programs.claude-code.plugins;
   mkClaudeConfig = import ../lib/mkClaudeConfig.nix { inherit lib; };
 
-  hasPlugins = cfg != {};
+  # Resolve plugin: flake inputs have a `plugin` attr keyed by system
+  resolvePlugin = p:
+    if p ? plugin then p.plugin.${pkgs.system}
+    else p;
 
-  # Extract only the fields mkClaudeConfig expects (src, description, skills)
-  pluginsForDrv = lib.mapAttrs (name: pluginCfg:
-    if pluginCfg.src != null then {
-      inherit (pluginCfg) src;
-    } else {
-      inherit (pluginCfg) description skills;
-    }
-  ) cfg;
+  resolvedPlugins = map resolvePlugin cfg;
+
+  hasPlugins = cfg != [];
 
   configDrv = mkClaudeConfig {
     inherit pkgs;
-    plugins = pluginsForDrv;
+    plugins = resolvedPlugins;
   };
 
   claudeDir = "${config.home.homeDirectory}/.claude";
 
   # Collect packages from all plugins
-  pluginPackages = lib.concatLists (lib.mapAttrsToList (_: pluginCfg:
-    lib.optional (pluginCfg.package != null) pluginCfg.package
-  ) cfg);
+  pluginPackages = lib.concatMap (p:
+    if p ? package && p.package != null then [ p.package ] else []
+  ) resolvedPlugins;
 
   # Deep-merge settings from all plugins
-  pluginSettings = lib.mapAttrsToList (_: pluginCfg: pluginCfg.settings) cfg;
+  pluginSettings = map (p: p.settings or {}) resolvedPlugins;
 
   # Manifest-based install: clean old entries, copy new ones, write manifest
   installWithManifest = { targetDir, sourceDir, copyCmd ? null }:
@@ -63,52 +61,12 @@ let
 in
 {
   options.programs.claude-code.plugins = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.submodule {
-      options = {
-        src = lib.mkOption {
-          type = lib.types.nullOr lib.types.path;
-          default = null;
-          description = ''
-            Path to an existing plugin directory. When set, skills and commands
-            are extracted and installed as bare skills/commands. The directory
-            should contain skills/<name>/SKILL.md and/or commands/<name>.md.
-            When set, description and skills options are ignored.
-          '';
-        };
-        description = lib.mkOption {
-          type = lib.types.str;
-          default = "";
-          description = "Plugin description (used when building from components).";
-        };
-        skills = lib.mkOption {
-          type = lib.types.listOf lib.types.path;
-          default = [];
-          description = "Skill directories (containing SKILL.md) provided by this plugin.";
-        };
-        package = lib.mkOption {
-          type = lib.types.nullOr lib.types.package;
-          default = null;
-          description = "Optional package provided by this plugin, added to home.packages.";
-        };
-        settings = lib.mkOption {
-          type = lib.types.attrs;
-          default = {};
-          description = ''
-            Settings contributed by this plugin, deep-merged into
-            programs.claude-code.settings. List values (like hooks.Stop)
-            concatenate when merged from multiple sources.
-          '';
-        };
-      };
-    });
-    default = {};
+    type = lib.types.listOf lib.types.attrs;
+    default = [];
     description = ''
-      Plugins to install for Claude Code. Skills are installed as bare
-      skills to ~/.claude/skills/ (auto-discovered by Claude Code).
-      Commands are installed to ~/.claude/commands/.
-
-      Use src to install from a pre-built plugin directory (e.g. from
-      claude-plugins-official). Skills and commands are extracted automatically.
+      Plugins to install for Claude Code. Each element is a plugin
+      attrset with optional skills, settings, package, and src fields.
+      Flake inputs with a `plugin` attr are resolved automatically.
     '';
   };
 
