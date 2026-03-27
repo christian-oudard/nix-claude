@@ -2,346 +2,82 @@
 
 Declarative configuration for Claude Code via Nix.
 
-## Overview
+## Problem
 
-A Nix library (`mkClaudeConfig`) and home-manager plugin module that assembles Claude Code configuration from declarative inputs.
+Claude Code's configuration is scattered across multiple files and formats (`~/.claude/skills/`, `~/.claude/commands/`, `~/.claude/CLAUDE.md`, `~/.claude/settings.json`, `~/.claude.json`). Setting up a Claude Code environment means manually copying files, editing JSON, and hoping nothing drifts. With multiple machines or sandboxed environments, this becomes untenable.
 
-nix-claude manages plugins and configuration extensions. It does not package the Claude Code binary or MCP server binaries. For home-manager users, nix-claude works alongside the built-in `programs.claude-code` module, which handles settings, memory, commands, skills, and MCP servers.
+## Scope
 
-## What nix-claude manages
+nix-claude manages configuration and extensions. It does not package the Claude Code binary or MCP server binaries.
 
-- Plugin skills (installed as bare skills to `~/.claude/skills/`, auto-discovered by Claude Code)
-- Plugin commands (installed to `~/.claude/commands/`)
-- Plugin packages (collected and added to `home.packages`)
-- Plugin settings (deep-merged into `programs.claude-code.settings`)
+**Manages:**
 
-Via `mkClaudeConfig` (standalone use):
-- Skills (bare directory-based skills, each containing SKILL.md)
+- Plugin skills, commands, packages, and settings
+- Skills (directory-based, each containing SKILL.md)
 - Commands (flat markdown files)
-- CLAUDE.md (persistent instructions, composed from fragments)
-- `~/.claude.json` state (MCP servers, onboarding skip, arbitrary fields)
-- Settings (written to `~/.claude/settings.json`)
+- CLAUDE.md (persistent instructions, composable from fragments)
+- MCP server configuration (in `~/.claude.json`)
+- Settings (in `~/.claude/settings.json`)
 
-## Architecture
+**Does not manage:**
 
-```
-                        nix-claude
-                       /          \
-          home-manager module    lib.mkClaudeConfig
-          (plugins only)        (full standalone config)
-                 |                      |
-     programs.claude-code.plugins   derivation output
-                 |                      |
-     + home.packages             /nix/store/...-claude-config/
-     + programs.claude-code.settings
-     + activation script (skills + commands)
-```
+- The Claude Code binary (use `claude-code-nix` or nixpkgs)
+- MCP server binaries (use `mcps.nix`, nixpkgs, or your own derivations)
+- Multi-account management (use `claude-env` if needed)
+- Runtime state (conversations, OAuth tokens, `.claude.json` fields Claude writes itself)
+- Per-project config (team-managed, committed to git)
+- Authentication (tokens flow through environment variables or the system keychain, never through the Nix store)
 
-### `lib.mkClaudeConfig`
+## Interfaces
 
-Pure function producing a derivation. Does not touch `~/.claude/`. Consumers decide how to install. Supports the full configuration surface.
+nix-claude provides three interfaces to the same underlying capability:
 
-```nix
-nix-claude.lib.mkClaudeConfig {
-  inherit pkgs;
-  skipOnboarding = true;
+**`lib.mkClaudeConfig`** -- Pure function producing a derivation. Does not touch `~/.claude/`. Supports the full configuration surface: plugins, skills, commands, memory fragments, MCP servers, settings, statusline, and arbitrary `.claude.json` fields. Consumers decide how to install the output.
 
-  plugins.persist = {
-    description = "Persistent coding sessions";
-    skills = builtins.attrValues persist.skills;
-  };
+**Home-manager module** -- Plugins only. Works alongside the built-in `programs.claude-code` module, which handles settings, memory, commands, skills, MCP servers, and the Claude Code package. nix-claude adds a `plugins` option and integrates plugin outputs into the built-in module's options.
 
-  commands = [ ./commands/quick-review.md ];
-  memory.fragments = [ ./base-claude.md "Inline instruction." ];
+## Plugins
 
-  mcpServers.github = {
-    command = "${github-mcp-server}/bin/github-mcp-server";
-    args = [ "stdio" ];
-  };
+A plugin is an attrset that can contain skills, a package, settings, and optionally a pre-built source directory. Plugins are the primary extension mechanism.
 
-  dotClaudeJson = { theme = "dark"; };
+Plugin flakes export a `plugin.<system>` attrset that bundles everything a consumer needs (skills, package, settings). Consumers pass plugin flake inputs directly in the `plugins` list, and nix-claude resolves the `plugin` attr automatically.
 
-  settings = {
-    permissions.allow = [ "Bash" "Read" "Write" ];
-    hooks.Stop = [{
-      matcher = "";
-      hooks = [{ type = "command"; command = "${persistPkg}/bin/persist hook"; }];
-    }];
-  };
-}
-```
+### Plugin composition
 
-Output derivation:
+- Plugin settings are deep-merged. User settings override plugin settings. Later plugins override earlier ones.
+- Plugin skills are installed as bare skill directories in `~/.claude/skills/`.
+- Plugin packages are collected and made available on PATH (via `home.packages` for home-manager, via `$out/packages/` for standalone).
+- List-typed settings (like hooks) concatenate when merged from multiple sources, so plugin hooks and user hooks coexist.
 
-```
-$out/
-  skills/
-    persist/SKILL.md
-    persist-status/SKILL.md
-    persist-stop/SKILL.md
-  commands/
-    quick-review.md
-  CLAUDE.md
-  dot-claude.json          # merged mcpServers + skipOnboarding + dotClaudeJson
-  settings.json
-```
+### Pre-built plugins
 
-### `lib.build`
+When a plugin provides a `src` directory, skills and commands are extracted from it directly. This supports installing pre-built plugin directories without enumerating individual skills.
 
-Simplified function producing a derivation for coding-cave consumption. Takes a flat list of plugins (already resolved from flake inputs), merges their settings and skills, and outputs a self-contained derivation.
+## Key constraints
 
-```nix
-nix-claude.lib.build {
-  inherit pkgs;
-  plugins = [ persist ];
-  settings = {
-    permissions.allow = [ "Bash(npm:*)" ];
-  };
-  skills = {
-    my-skill = "Custom skill content...";
-  };
-  statusline = "#!/bin/bash\nread -r input\necho custom";
-}
-```
-
-Output derivation:
-
-```
-$out/
-  settings.json       # Merged from plugins + user settings
-  skills/             # Plugin skills (hash-stripped) + user inline skills
-    persist/SKILL.md
-    my-skill/SKILL.md
-  packages/           # Symlinks to plugin packages (added to PATH by consumer)
-    persist -> /nix/store/...
-  statusline.sh       # Optional statusline script
-```
-
-**Settings merging**: Plugin settings are folded left with `recursiveUpdate`, then user settings override. This means later plugins override earlier ones, and user settings override all plugins.
-
-**Plugin skills**: Each plugin's `skills` list contains store paths to directories with SKILL.md. The 33-char nix store hash prefix is stripped from directory names.
-
-**User inline skills**: Attrset of `{ name = "markdown content"; }`, written as `$out/skills/<name>/SKILL.md`. Inline skills override plugin skills with the same name.
-
-**Plugin packages**: Collected from `plugin.package` and symlinked into `$out/packages/`. The consumer (coding-cave) adds these to PATH.
-
-### Home-manager module
-
-The home-manager module is plugins-only. It works alongside the built-in `programs.claude-code` module (provided by home-manager or claude-code-nix), which handles settings, memory, commands, skills, MCP servers, and the Claude Code package.
-
-```nix
-# Built-in module handles core config
-programs.claude-code = {
-  enable = true;
-  settings = {
-    permissions.allow = [ "Bash" "Read" "Write" ];
-  };
-};
-
-# nix-claude adds plugin support
-programs.claude-code.plugins.persist = {
-  description = "Persistent coding sessions";
-  skills = builtins.attrValues persist.skills;
-  package = persistPkg;
-  settings = {
-    hooks.Stop = [{
-      matcher = "";
-      hooks = [{ type = "command"; command = "${persistPkg}/bin/persist hook"; }];
-    }];
-  };
-};
-```
-
-The module:
-
-1. Installs skills as bare skills to `~/.claude/skills/` via activation script
-2. Installs commands to `~/.claude/commands/` via activation script
-3. Collects `package` from each plugin into `home.packages`
-4. Deep-merges `settings` from each plugin into `programs.claude-code.settings`
-
-Since `programs.claude-code.settings` uses `pkgs.formats.json` type, list values (like `hooks.Stop`) concatenate when merged from multiple sources. This means plugin hooks and user hooks both end up in the final `settings.json`.
-
-## Options reference
-
-### Home-manager module (plugins)
-
-```
-programs.claude-code.plugins : attrset of {
-  src : path | null                    # existing plugin directory (skills/commands extracted)
-  description : string                 # plugin description (ignored if src set)
-  skills : list of path                # skill directories with SKILL.md (ignored if src set)
-  package : package | null             # optional; added to home.packages
-  settings : attrset                   # deep-merged into programs.claude-code.settings
-}
-```
-
-When `src` is set, skills and commands are extracted from the directory and installed
-as bare skills/commands. This is useful for installing pre-built plugins (e.g. from
-`claude-plugins-official`). When `src` is not set, skills are taken from the `skills` list.
-
-### `lib.build` (coding-cave)
-
-```
-build {
-  pkgs : pkgs                            # required
-
-  plugins : list of {                    # resolved plugin attrsets
-    package : derivation | null          # optional; symlinked to $out/packages/
-    settings : attrset                   # merged (folded left, user overrides)
-    skills : list of path                # store paths to skill dirs with SKILL.md
-  }
-
-  settings : attrset                     # user settings (override plugin settings)
-  skills : attrset of string             # { name = "SKILL.md content"; }
-  statusline : string | null             # optional statusline script
-}
-```
-
-### `mkClaudeConfig` (standalone)
-
-```
-mkClaudeConfig {
-  pkgs : pkgs                            # required
-
-  plugins : attrset of {                 # skills installed as bare skills
-    src : path | null                    # existing plugin directory (skills/commands extracted)
-    description : string                 # plugin description (ignored if src set)
-    skills : list of path                # skill directories with SKILL.md (ignored if src set)
-  }
-
-  skills : list of path                  # bare skills in ~/.claude/skills/
-  commands : list of path                # flat .md files
-  commandsDir : path | null              # directory of .md files (bulk import)
-
-  memory = {
-    fragments : list of (path | string)  # concatenated into CLAUDE.md
-    separator : string                   # default "\n\n"
-  };
-
-  mcpServers : attrset of attrset        # merged into ~/.claude.json
-  skipOnboarding : bool                  # default false; skip first-run prompts
-  dotClaudeJson : attrset                # arbitrary fields merged into ~/.claude.json
-  settings : attrset                     # written to settings.json; empty = unmanaged
-}
-```
+- **No symlinks.** Claude Code cannot read symlinked config files. All installation copies files.
+- **`~/.claude.json` is mutable at runtime.** Claude writes onboarding state and other fields to this file. nix-claude deep-merges its fields (`mcpServers`, `skipOnboarding`, arbitrary fields) rather than replacing the file.
+- **`~/.claude/settings.json` is not mutable at runtime.** Written wholesale when settings are provided. Empty settings means the file is unmanaged.
+- **`skipOnboarding` is separate from `settings`.** It writes to `~/.claude.json` (runtime state file), not `settings.json`. Claude Code checks `hasCompletedOnboarding` in the runtime JSON, not in settings.
+- **CLAUDE.md is composed from fragments.** Multiple sources can contribute instructions without conflicting. Fragments are concatenated in order.
+- **Managed files are tracked for cleanup.** When a skill or command is removed from the Nix config, the next activation deletes it. User-added files outside the managed set are preserved.
 
 ## Design decisions
 
 ### Skills use bare skill directories
 
-nix-claude installs plugin skills as bare skills to `~/.claude/skills/<name>/`. Claude Code auto-discovers skill directories containing `SKILL.md` in this location. This is simpler and more reliable than the plugin cache system, which requires a recognized marketplace.
-
-The `plugins` option in mkClaudeConfig extracts skills from plugin sources and outputs them to `$out/skills/`. The home-manager activation script copies them to `~/.claude/skills/` with manifest-based tracking for cleanup.
+Skills are installed as bare directories containing SKILL.md, which Claude Code auto-discovers. This is simpler and more reliable than the plugin cache system, which requires a recognized marketplace.
 
 ### Home-manager module is plugins-only
 
-The home-manager module only manages plugins. Settings, memory, commands, skills, MCP servers, and the Claude Code package are handled by the built-in `programs.claude-code` module. This avoids re-declaring options that already exist upstream and lets nix-claude focus on what it adds: the plugin system.
+The built-in `programs.claude-code` module already handles settings, memory, commands, skills, MCP servers, and the package. nix-claude only adds the plugin concept, avoiding duplicate options and composing cleanly with upstream.
 
-Plugin settings are deep-merged into `programs.claude-code.settings` via `lib.mkMerge`, so plugins can contribute hooks, permissions, and other settings that combine naturally with user-defined settings.
+### Skills and commands are separate
 
-### Skills go in `~/.claude/skills/`, not `~/.claude/commands/`
+Claude Code distinguishes `~/.claude/skills/<name>/SKILL.md` (directory-based skills) from `~/.claude/commands/<name>.md` (flat markdown commands). nix-claude preserves this distinction.
 
-Claude Code uses two separate directories:
+## Relationship to other projects
 
-- `~/.claude/skills/<name>/SKILL.md` -- directory-based skills (slash commands)
-- `~/.claude/commands/<name>.md` -- flat markdown commands
-
-The `plugins` option installs skills to `~/.claude/skills/`. In standalone mode, the `skills` option also installs bare skills to `~/.claude/skills/` and the `commands` option installs flat commands to `~/.claude/commands/`.
-
-### `~/.claude.json` is assembled from multiple sources (standalone)
-
-Three options contribute to `~/.claude.json`, merged in this order:
-
-1. `skipOnboarding` -- sets `hasCompletedOnboarding` and `effortCalloutDismissed`
-2. `mcpServers` -- sets the `mcpServers` key
-3. `dotClaudeJson` -- arbitrary fields (e.g. `theme`, preferences)
-
-These are merged with `//` (later keys win) into a single `dot-claude.json` in the derivation output.
-
-### Idempotency and cleanup: manifest-based tracking
-
-Managed files are tracked via `.nix-claude-managed` manifest files. On each activation: read the previous manifest, delete listed entries, copy new files, write updated manifest. User-added files outside the manifest are preserved.
-
-### Activation scripts, not symlinks
-
-Claude Code cannot read symlinked config files. All files are copied via `install -m 0644` (files) or `cp -r` + `chmod` (directories).
-
-### Plugin convention for flakes
-
-Plugin flakes export:
-
-- `packages.<system>.default` -- the plugin binary (if any)
-- `skills.<name>` -- paths to skill directories
-- `plugin.<system>` -- a ready-made nix-claude config attrset (description, skills, package, settings)
-
-The `plugin` output bundles everything a consumer needs:
-
-```nix
-plugin = eachSystem (system:
-  let pkg = self.packages.${system}.default; in {
-    description = "Persistent coding sessions for Claude Code";
-    skills = builtins.attrValues self.skills;
-    package = pkg;
-    settings.hooks.Stop = [{
-      matcher = "";
-      hooks = [{ type = "command"; command = "${pkg}/bin/persist hook"; }];
-    }];
-  });
-```
-
-Consumers use a single line:
-
-```nix
-plugins.persist = persist.plugin.${system};
-```
-
-### Authentication is out of scope
-
-nix-claude manages configuration, not credentials. OAuth tokens flow through environment variables (`CLAUDE_CODE_OAUTH_TOKEN`) or the system keychain, never through the Nix store. See README for setup guidance.
-
-### Per-project config is out of scope
-
-Per-project config is team-managed (committed to git), not generated from one person's Nix config.
-
-### `~/.claude/` directory audit
-
-```
-backups/          # runtime
-cache/            # runtime
-CLAUDE.md         # managed by built-in module or mkClaudeConfig
-commands/         # managed by nix-claude (plugin commands) or mkClaudeConfig
-debug/            # runtime
-file-history/     # runtime
-history.jsonl     # runtime
-paste-cache/      # runtime
-plugins/          # runtime (marketplace plugins only)
-projects/         # runtime (per-project memory)
-session-env/      # runtime
-settings.json     # managed by built-in module or mkClaudeConfig
-shell-snapshots/  # runtime
-skills/           # managed by nix-claude (plugin skills) or mkClaudeConfig
-tasks/            # runtime
-telemetry/        # runtime
-todos/            # runtime
-```
-
-nix-claude home-manager module manages: `skills/` (bare skills from plugins), `commands/` (from src-based plugins), and contributes to `programs.claude-code.settings` and `home.packages`.
-
-## File layout
-
-```
-nix-claude/
-  flake.nix
-  lib/
-    mkClaudeConfig.nix    # core: inputs -> derivation
-    options.nix            # shared option type definitions (standalone)
-  modules/
-    home-manager.nix       # home-manager module (plugins only)
-  tests/
-    default.nix            # nix flake checks
-    fixtures/              # test data
-  examples/
-    persist/flake.nix      # real-world usage example
-  SPEC.md
-  DESIGN.md               # design exploration + built-in module relationship
-```
+- **claude-code-nix**: provides the Claude Code binary. nix-claude uses it as the default package but doesn't depend on it.
+- **mcps.nix**: complementary. Both write to `programs.claude-code` options and compose via home-manager option merging.
+- **claude-env**: orthogonal. Manages which config directory Claude uses, not what's in it.

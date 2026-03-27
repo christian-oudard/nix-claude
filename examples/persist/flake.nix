@@ -13,7 +13,7 @@
       pkgs = nixpkgs.legacyPackages.${system};
     in
     {
-      # Option A: standalone derivation (for coding-cave or manual install)
+      # Option A: standalone derivation (for manual install)
       packages.${system}.claude-config = nix-claude.lib.mkClaudeConfig {
         inherit pkgs;
         skipOnboarding = true;

@@ -2,7 +2,7 @@
 
 Declarative configuration for Claude Code via Nix.
 
-Manages Claude Code plugins via Nix. The home-manager module adds plugin support (skills, packages, settings) alongside the built-in `programs.claude-code` module. For standalone use (coding-cave, scripts), `mkClaudeConfig` supports the full configuration surface.
+Manages Claude Code plugins, skills, commands, settings, and MCP servers via Nix. The home-manager module adds plugin support alongside the built-in `programs.claude-code` module. For standalone use, `mkClaudeConfig` produces a self-contained derivation.
 
 ## Quick start
 
@@ -43,28 +43,27 @@ nix-claude adds plugin support alongside the built-in `programs.claude-code` mod
     };
   };
 
-  # Plugin flakes export a ready-made config attrset
-  programs.claude-code.plugins.persist = persist.plugin.${system};
+  # Plugins are a list; flake inputs are resolved automatically
+  programs.claude-code.plugins = [ persist ];
 }
 ```
 
 Plugin settings are deep-merged into `programs.claude-code.settings`. List values like `hooks.Stop` concatenate, so plugin hooks and user hooks both end up in the final `settings.json`.
 
-### Standalone (coding-cave, scripts)
+### Standalone (`mkClaudeConfig`)
 
 ```nix
 let
   claudeConfig = nix-claude.lib.mkClaudeConfig {
     inherit pkgs;
     skipOnboarding = true;
-    plugins.persist = persist.plugin.${system};
+    plugins = [ persist ];
     memory.fragments = [ ./instructions.md ];
     mcpServers.github = { command = "..."; args = [ "stdio" ]; };
   };
 in
 # claudeConfig is a derivation containing:
-# $out/plugins/cache/nix-claude/persist/<version>/...
-# $out/plugins/installed_plugins.json
+# $out/skills/persist/SKILL.md
 # $out/CLAUDE.md
 # $out/dot-claude.json
 ```
@@ -73,15 +72,20 @@ Copy the output into `~/.claude/` however you like.
 
 ## Options
 
-### Home-manager module (plugins)
+### Home-manager module
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `plugins` | attrset of submodule | `{}` | Plugins installed via Claude's plugin system |
-| `plugins.<name>.description` | string | `""` | Plugin description for plugin.json |
-| `plugins.<name>.skills` | list of path | `[]` | Skill directories (containing SKILL.md) |
-| `plugins.<name>.package` | package or null | `null` | Plugin package, added to home.packages |
-| `plugins.<name>.settings` | attrset | `{}` | Settings deep-merged into programs.claude-code.settings |
+| `plugins` | list of attrs | `[]` | Plugins to install. Flake inputs with a `plugin` attr are resolved automatically. |
+
+Each plugin attrset can have:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `src` | path or null | Pre-built plugin directory (skills/commands extracted) |
+| `skills` | list of path | Skill directories containing SKILL.md (ignored if `src` set) |
+| `package` | package or null | Added to `home.packages` |
+| `settings` | attrset | Deep-merged into `programs.claude-code.settings` |
 
 Core options (`enable`, `package`, `settings`, `memory`, `commands`, `skills`, `mcpServers`, `skipOnboarding`, `dotClaudeJson`) are provided by the built-in `programs.claude-code` module.
 
@@ -89,22 +93,17 @@ Core options (`enable`, `package`, `settings`, `memory`, `commands`, `skills`, `
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `plugins` | attrset of { description, skills } | `{}` | Plugins installed via Claude's plugin system |
-| `skills` | list of path | `[]` | Bare skills installed to ~/.claude/skills/ |
+| `plugins` | list of attrs | `[]` | Plugins (skills installed as bare skills) |
+| `skills` | list of path | `[]` | Bare skills installed to `$out/skills/` |
 | `commands` | list of path | `[]` | Flat markdown command files |
 | `commandsDir` | path or null | `null` | Directory of .md files to bulk-import |
 | `memory.fragments` | list of (path or string) | `[]` | Concatenated into CLAUDE.md |
 | `memory.separator` | string | `"\n\n"` | Separator between fragments |
-| `mcpServers` | attrset | `{}` | MCP server configs, merged into ~/.claude.json |
-| `skipOnboarding` | bool | `false` | Skip first-run onboarding prompts |
-| `dotClaudeJson` | attrset | `{}` | Arbitrary fields merged into ~/.claude.json |
-| `settings` | attrset | `{}` | Written to ~/.claude/settings.json |
-
-## Plugins vs skills
-
-**Plugins** (`plugins` option) are installed through Claude Code's plugin system -- they appear in `~/.claude/plugins/` with full metadata (`installed_plugins.json`, `plugin.json`), as if installed via the marketplace. This is the recommended way to install skills.
-
-**Bare skills** (`skills` option) are installed directly to `~/.claude/skills/`. Simpler, but not visible to Claude Code's plugin management.
+| `mcpServers` | attrset | `{}` | MCP server configs, merged into `dot-claude.json` |
+| `skipOnboarding` | bool | `false` | Skip first-run prompts (writes to `~/.claude.json`, not `settings.json`) |
+| `dotClaudeJson` | attrset | `{}` | Arbitrary fields merged into `dot-claude.json` |
+| `settings` | attrset | `{}` | Written to `settings.json` |
+| `statusline` | string or null | `null` | Statusline script content |
 
 ## Writing a plugin flake
 
@@ -140,10 +139,10 @@ The `plugin` output bundles description, skills, package, and settings so consum
 }
 ```
 
-Consumers then use a single line:
+Consumers pass plugin flake inputs directly in the `plugins` list. nix-claude resolves the `plugin` attr automatically:
 
 ```nix
-plugins.persist = persist.plugin.${system};
+programs.claude-code.plugins = [ persist ];
 ```
 
 See `examples/persist/` for a real-world example using [persist](https://github.com/christian-oudard/persist).

@@ -10,6 +10,7 @@
 , settings ? {}
 , skipOnboarding ? false
 , dotClaudeJson ? {}
+, statusline ? null
 }:
 
 let
@@ -17,7 +18,11 @@ let
   separator = memory.separator or "\n\n";
 
   baseName = path:
-    lib.last (lib.splitString "/" (toString path));
+    let raw = lib.last (lib.splitString "/" (toString path)); in
+    # Strip 33-char nix store hash prefix (e.g. "abc123-my-skill" -> "my-skill")
+    if builtins.stringLength raw > 33 && builtins.substring 32 1 raw == "-"
+    then builtins.substring 33 (-1) raw
+    else raw;
 
   # Resolve plugin: flake inputs have a `plugin` attr keyed by system
   resolvePlugin = p:
@@ -138,5 +143,10 @@ pkgs.runCommand "claude-config" {} ''
 
   ${lib.optionalString (settingsJson != null) ''
     cp ${pkgs.writeText "settings.json" settingsJson} "$out/settings.json"
+  ''}
+
+  ${lib.optionalString (statusline != null) ''
+    cp ${pkgs.writeText "statusline.sh" statusline} "$out/statusline.sh"
+    chmod +x "$out/statusline.sh"
   ''}
 ''
