@@ -4,29 +4,14 @@ let
   cfg = config.programs.claude-code.plugins;
   mkClaudeConfig = import ../lib/mkClaudeConfig.nix { inherit lib; };
 
-  # Resolve plugin: flake inputs have a `plugin` attr keyed by system
-  resolvePlugin = p:
-    if p ? plugin then p.plugin.${pkgs.system}
-    else p;
-
-  resolvedPlugins = map resolvePlugin cfg;
-
   hasPlugins = cfg != [];
 
   configDrv = mkClaudeConfig {
     inherit pkgs;
-    plugins = resolvedPlugins;
+    plugins = cfg;
   };
 
   claudeDir = "${config.home.homeDirectory}/.claude";
-
-  # Collect packages from all plugins
-  pluginPackages = lib.concatMap (p:
-    if p ? package && p.package != null then [ p.package ] else []
-  ) resolvedPlugins;
-
-  # Deep-merge settings from all plugins
-  pluginSettings = map (p: p.settings or {}) resolvedPlugins;
 
   # Manifest-based install: clean old entries, copy new ones, write manifest
   installWithManifest = { targetDir, sourceDir, copyCmd ? null }:
@@ -71,9 +56,9 @@ in
   };
 
   config = lib.mkIf hasPlugins {
-    home.packages = pluginPackages;
+    home.packages = configDrv.packages;
 
-    programs.claude-code.settings = lib.mkMerge pluginSettings;
+    programs.claude-code.settings = configDrv.settings;
 
     home.activation.nixClaudePlugins = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       # Install skills

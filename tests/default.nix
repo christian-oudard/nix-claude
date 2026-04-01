@@ -214,6 +214,83 @@ in
       '';
     };
 
+  plugin-packages =
+    let
+      fakePkg = pkgs.runCommand "my-tool" {} ''
+        mkdir -p $out/bin
+        echo "#!/bin/sh" > $out/bin/my-tool
+        chmod +x $out/bin/my-tool
+      '';
+      drv = mkClaudeConfig {
+        inherit pkgs;
+        plugins = [{
+          skills = [ "${fixtures}/test-skill" ];
+          package = fakePkg;
+        }];
+      };
+    in
+    mkTest "plugin-packages" {
+      inherit drv;
+      script = ''
+        test -d "${drv}/packages"
+        test -L "${drv}/packages/my-tool"
+        test -x "${drv}/packages/my-tool/bin/my-tool"
+      '';
+    };
+
+  plugin-settings =
+    let drv = mkClaudeConfig {
+      inherit pkgs;
+      plugins = [{
+        settings.hooks.Stop = [{ hooks = [{ type = "command"; command = "persist hook"; }]; }];
+      }];
+      settings.model = "opus";
+    }; in
+    mkTest "plugin-settings" {
+      inherit drv;
+      script = ''
+        test -f "${drv}/settings.json"
+        # Plugin settings merged in
+        ${pkgs.jq}/bin/jq -e '.hooks.Stop | length == 1' "${drv}/settings.json"
+        # User settings override plugin settings
+        ${pkgs.jq}/bin/jq -e '.model == "opus"' "${drv}/settings.json"
+      '';
+    };
+
+  plugin-settings-list-concat =
+    let drv = mkClaudeConfig {
+      inherit pkgs;
+      plugins = [{
+        settings.hooks.Stop = [{ hooks = [{ type = "command"; command = "persist hook"; }]; }];
+      }];
+      settings.hooks.Stop = [{ hooks = [{ type = "command"; command = "user hook"; }]; }];
+    }; in
+    mkTest "plugin-settings-list-concat" {
+      inherit drv;
+      script = ''
+        # Both plugin and user hooks present (concatenated, not clobbered)
+        ${pkgs.jq}/bin/jq -e '.hooks.Stop | length == 2' "${drv}/settings.json"
+        ${pkgs.jq}/bin/jq -e '.hooks.Stop[0].hooks[0].command == "persist hook"' "${drv}/settings.json"
+        ${pkgs.jq}/bin/jq -e '.hooks.Stop[1].hooks[0].command == "user hook"' "${drv}/settings.json"
+      '';
+    };
+
+  plugin-settings-override =
+    let drv = mkClaudeConfig {
+      inherit pkgs;
+      plugins = [{
+        settings.model = "sonnet";
+      }];
+      settings.model = "opus";
+    }; in
+    mkTest "plugin-settings-override" {
+      inherit drv;
+      script = ''
+        # User settings take precedence over plugin settings
+        ${pkgs.jq}/bin/jq -e '.model == "opus"' "${drv}/settings.json"
+      '';
+    };
+
   empty-config =
     let drv = mkClaudeConfig { inherit pkgs; }; in
     mkTest "empty-config" {

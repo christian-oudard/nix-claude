@@ -31,6 +31,25 @@ let
 
   resolvedPlugins = map resolvePlugin plugins;
 
+  # Deep merge that concatenates lists instead of replacing them
+  deepMerge = a: b:
+    a // lib.mapAttrs (name: bVal:
+      if !(a ? ${name}) then bVal
+      else let aVal = a.${name}; in
+        if lib.isAttrs aVal && lib.isAttrs bVal then deepMerge aVal bVal
+        else if lib.isList aVal && lib.isList bVal then aVal ++ bVal
+        else bVal
+    ) b;
+
+  # Extract packages and settings from resolved plugins
+  pluginPackages = lib.concatMap (p:
+    if p ? package && p.package != null then [ p.package ] else []
+  ) resolvedPlugins;
+
+  pluginSettings = lib.foldl' (acc: p:
+    deepMerge acc (p.settings or {})
+  ) {} resolvedPlugins;
+
   readFragment = f:
     if builtins.isString f && !(lib.hasPrefix "/" f || lib.hasPrefix "/nix/store" f)
     then f
@@ -64,9 +83,12 @@ let
     if mergedDotClaudeJson == {} then null
     else builtins.toJSON mergedDotClaudeJson;
 
+  # Merge: plugin settings < user settings (user wins, lists concatenate)
+  mergedSettings = deepMerge pluginSettings settings;
+
   settingsJson =
-    if settings == {} then null
-    else builtins.toJSON settings;
+    if mergedSettings == {} then null
+    else builtins.toJSON mergedSettings;
 
   # Install skills and commands from plugins
   installPlugins = lib.concatMapStringsSep "\n" (cfg:
@@ -125,13 +147,23 @@ let
     ''
   ) allCommands;
 
-in
-pkgs.runCommand "claude-config" {} ''
+  installPackages = lib.concatMapStringsSep "\n" (p:
+    let name = p.pname or (builtins.parseDrvName p.name).name; in
+    ''
+      if [ -d "${p}/bin" ]; then
+        mkdir -p "$out/packages"
+        ln -s ${p} "$out/packages/${name}"
+      fi
+    ''
+  ) pluginPackages;
+
+  drv = pkgs.runCommand "claude-config" {} ''
   mkdir -p "$out"
 
   ${installPlugins}
   ${installSkills}
   ${installCommands}
+  ${installPackages}
 
   ${lib.optionalString (claudeMd != null) ''
     cp ${pkgs.writeText "CLAUDE.md" claudeMd} "$out/CLAUDE.md"
@@ -149,4 +181,9 @@ pkgs.runCommand "claude-config" {} ''
     cp ${pkgs.writeText "statusline.sh" statusline} "$out/statusline.sh"
     chmod +x "$out/statusline.sh"
   ''}
-''
+'';
+
+in drv // {
+  packages = pluginPackages;
+  settings = mergedSettings;
+}
