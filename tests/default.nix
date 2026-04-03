@@ -162,7 +162,7 @@ in
     let
       # Simulate a flake input with a `plugin` attr
       fakeFlakeInput = {
-        plugin.${pkgs.system} = {
+        plugin.${pkgs.stdenv.hostPlatform.system} = {
           skills = [ "${fixtures}/test-skill" ];
         };
       };

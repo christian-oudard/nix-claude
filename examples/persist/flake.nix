@@ -23,7 +23,7 @@
       # Option B: home-manager module config (for NixOS users)
       # In your home.nix:
       #
-      #   imports = [ nix-claude.homeManagerModules.default ];
+      #   imports = [ nix-claude.homeModules.default ];
       #
       #   programs.claude-code = {
       #     enable = true;

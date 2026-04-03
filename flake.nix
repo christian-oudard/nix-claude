@@ -12,8 +12,8 @@
       lib.mkClaudeConfig = import ./lib/mkClaudeConfig.nix { inherit lib; };
       lib.options = import ./lib/options.nix { inherit lib; };
 
-      homeManagerModules.default = import ./modules/home-manager.nix;
-      homeManagerModules.claude-code = self.homeManagerModules.default;
+      homeModules.default = import ./modules/home-manager.nix;
+      homeModules.claude-code = self.homeModules.default;
 
       checks = eachSystem (system:
         let

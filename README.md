@@ -19,7 +19,7 @@ nix-claude adds plugin support alongside the built-in `programs.claude-code` mod
 ```nix
 { nix-claude, persist, ... }:
 {
-  imports = [ nix-claude.homeManagerModules.default ];
+  imports = [ nix-claude.homeModules.default ];
 
   # Built-in module handles core config
   programs.claude-code = {
@@ -175,8 +175,8 @@ nix-claude composes with [mcps.nix](https://github.com/roman/mcps.nix) via home-
 
 ```nix
 imports = [
-  nix-claude.homeManagerModules.default
-  mcps-nix.homeManagerModules.default
+  nix-claude.homeModules.default
+  mcps-nix.homeModules.default
 ];
 ```
 

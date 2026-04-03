@@ -26,7 +26,7 @@ let
 
   # Resolve plugin: flake inputs have a `plugin` attr keyed by system
   resolvePlugin = p:
-    if p ? plugin then p.plugin.${pkgs.system}
+    if p ? plugin then p.plugin.${pkgs.stdenv.hostPlatform.system}
     else p;
 
   resolvedPlugins = map resolvePlugin plugins;
